@@ -83,6 +83,7 @@ data class SyncAttendanceDto(
 @JsonClass(generateAdapter = true)
 data class SyncPaymentDto(
     val uuid: String,
+    @Json(name = "user_uuid") val userUuid: String? = null,
     @Json(name = "student_uuid") val studentUuid: String,
     @Json(name = "class_uuid") val classUuid: String,
     @Json(name = "amount_paid") val amountPaid: Double,
@@ -90,7 +91,9 @@ data class SyncPaymentDto(
     @Json(name = "receipt_no") val receiptNo: String? = "",
     @Json(name = "month_covered") val monthCovered: String? = "",
     val note: String? = "",
-    @Json(name = "created_at") val createdAt: Long
+    @Json(name = "is_deleted") val isDeleted: Int = 0,
+    @Json(name = "created_at") val createdAt: Long,
+    @Json(name = "updated_at") val updatedAt: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)

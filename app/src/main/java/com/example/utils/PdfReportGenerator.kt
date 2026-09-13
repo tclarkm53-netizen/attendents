@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -984,40 +985,144 @@ object PdfReportGenerator {
         printManager.print(jobName, printAdapter, PrintAttributes.Builder().build())
     }
 
+    data class SavedPdfResult(
+        val uri: Uri?,
+        val folderName: String = "attendent",
+        val displayPath: String = "attendent",
+        val file: File? = null
+    )
+
     /**
-     * Copy PDF to Public Downloads Directory
+     * Save PDF directly into 'attendent' folder (NOT Downloads)
      */
-    fun savePdfToDownloads(context: Context, pdfFile: File): Uri? {
+    fun savePdfToAttendentFolder(context: Context, pdfFile: File): SavedPdfResult {
+        var resultUri: Uri? = null
+        var displayLocation = "attendent"
+        var finalSavedFile: File? = null
+
+        // 1. Direct device root storage: /storage/emulated/0/attendent/
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, pdfFile.name)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AttendanceReports")
-                }
-                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                if (uri != null) {
-                    context.contentResolver.openOutputStream(uri)?.use { out ->
-                        FileInputStream(pdfFile).use { input ->
-                            input.copyTo(out)
-                        }
-                    }
-                    return uri
-                }
-            } else {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val targetDir = File(downloadsDir, "AttendanceReports").apply { mkdirs() }
-                val targetFile = File(targetDir, pdfFile.name)
+            val rootDir = Environment.getExternalStorageDirectory()
+            val attendentDir = File(rootDir, "attendent")
+            if (!attendentDir.exists()) {
+                attendentDir.mkdirs()
+            }
+            if (attendentDir.exists()) {
+                val targetFile = File(attendentDir, pdfFile.name)
                 FileInputStream(pdfFile).use { input ->
                     FileOutputStream(targetFile).use { output ->
                         input.copyTo(output)
                     }
                 }
-                return Uri.fromFile(targetFile)
+                finalSavedFile = targetFile
+                displayLocation = "attendent/${pdfFile.name}"
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(targetFile.absolutePath),
+                    arrayOf("application/pdf")
+                ) { _, uri ->
+                    if (resultUri == null && uri != null) {
+                        resultUri = uri
+                    }
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return null
+
+        // 2. Documents/attendent folder: /storage/emulated/0/Documents/attendent/
+        try {
+            val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            val docsAttendentDir = File(docsDir, "attendent")
+            if (!docsAttendentDir.exists()) {
+                docsAttendentDir.mkdirs()
+            }
+            if (docsAttendentDir.exists()) {
+                val targetFile = File(docsAttendentDir, pdfFile.name)
+                FileInputStream(pdfFile).use { input ->
+                    FileOutputStream(targetFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (finalSavedFile == null) finalSavedFile = targetFile
+                displayLocation = "attendent/${pdfFile.name}"
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(targetFile.absolutePath),
+                    arrayOf("application/pdf"),
+                    null
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. MediaStore API for Android 10+ (API 29+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val paths = listOf("Documents/attendent", "attendent")
+            for (relPath in paths) {
+                try {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, pdfFile.name)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
+                    }
+                    val uri = context.contentResolver.insert(
+                        MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                        values
+                    )
+                    if (uri != null) {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            FileInputStream(pdfFile).use { input ->
+                                input.copyTo(out)
+                            }
+                        }
+                        resultUri = uri
+                        displayLocation = "attendent/${pdfFile.name}"
+                        break
+                    }
+                } catch (e: Exception) {
+                    // Try next path
+                }
+            }
+        }
+
+        // 4. App external files directory fallback: Android/data/<package>/files/attendent/
+        try {
+            val appExtDir = File(context.getExternalFilesDir(null), "attendent").apply { mkdirs() }
+            val appTargetFile = File(appExtDir, pdfFile.name)
+            FileInputStream(pdfFile).use { input ->
+                FileOutputStream(appTargetFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            if (finalSavedFile == null) finalSavedFile = appTargetFile
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 5. Ensure valid Uri for viewing or sharing
+        if (resultUri == null) {
+            val fileForUri = finalSavedFile ?: pdfFile
+            resultUri = try {
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", fileForUri)
+            } catch (e: Exception) {
+                Uri.fromFile(fileForUri)
+            }
+        }
+
+        return SavedPdfResult(
+            uri = resultUri,
+            folderName = "attendent",
+            displayPath = displayLocation,
+            file = finalSavedFile ?: pdfFile
+        )
+    }
+
+    /**
+     * Backward-compatible alias for saving PDF into 'attendent' folder (NOT Downloads)
+     */
+    fun savePdfToDownloads(context: Context, pdfFile: File): Uri? {
+        return savePdfToAttendentFolder(context, pdfFile).uri
     }
 }

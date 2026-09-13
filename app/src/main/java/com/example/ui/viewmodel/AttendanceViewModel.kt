@@ -33,6 +33,9 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
+    private val _isAuthChecking = MutableStateFlow(true)
+    val isAuthChecking: StateFlow<Boolean> = _isAuthChecking.asStateFlow()
+
     val activeUser: StateFlow<UserEntity?> = repository.activeUser.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -108,11 +111,24 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     init {
         // Observe active user changes to auto-select first class & sync unsynced count
         viewModelScope.launch {
-            activeUser.collect { user ->
+            repository.activeUser.collect { user ->
+                _isAuthChecking.value = false
                 if (user != null) {
+                    triggerSync()
                     repository.getUnsyncedCount(user.uuid).collect { count ->
                         _unsyncedCount.value = count
                     }
+                }
+            }
+        }
+
+        // Real-time background sync every 20 seconds
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(20_000)
+                val user = activeUser.value
+                if (user != null && repository.isNetworkAvailable()) {
+                    repository.performSync(user.uuid)
                 }
             }
         }
@@ -215,8 +231,6 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun markStudent(studentUuid: String, status: String, remarks: String = "") {
-        if (!isCurrentDateSelected()) return
-
         val current = _attendanceMap.value.toMutableMap()
         val oldRemarks = current[studentUuid]?.second ?: ""
         current[studentUuid] = Pair(status, if (remarks.isNotBlank()) remarks else oldRemarks)
@@ -224,8 +238,6 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun markAll(status: String) {
-        if (!isCurrentDateSelected()) return
-
         val date = _selectedDate.value
         val admittedStudents = studentsInSelectedClass.value.filter { isStudentAdmittedOnOrBefore(it, date) }
         val current = _attendanceMap.value.toMutableMap()
@@ -240,11 +252,6 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         val user = activeUser.value ?: return onComplete(false, "লগইন করা আবশ্যক")
         val cls = _selectedClass.value ?: return onComplete(false, "কোনো ক্লাস নির্বাচন করা হয়নি")
         val date = _selectedDate.value
-        val today = getTodayDateString()
-
-        if (date != today) {
-            return onComplete(false, "শুধুমাত্র আজকের ($today) হাজিরা পরিবর্তন ও সংরক্ষণ করা যাবে।")
-        }
 
         val admittedStudents = studentsInSelectedClass.value.filter { isStudentAdmittedOnOrBefore(it, date) }
         if (admittedStudents.isEmpty()) {
@@ -270,7 +277,7 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
                     studentStatusMap = completeMap
                 )
                 _isSaving.value = false
-                onComplete(true, "আজকের ($date) হাজিরা সফলভাবে সংরক্ষিত হয়েছে")
+                onComplete(true, "$date তারিখের হাজিরা সফলভাবে সংরক্ষিত হয়েছে")
             } catch (e: Exception) {
                 _isSaving.value = false
                 onComplete(false, "সংরক্ষণ ব্যর্থ: ${e.localizedMessage}")
@@ -331,6 +338,35 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             repository.updateStudentMonthlyFee(studentUuid, monthlyFee, user.uuid)
             loadFeeSummariesForSelectedClass()
+        }
+    }
+
+    fun updateStudent(
+        studentUuid: String,
+        roll: String,
+        name: String,
+        phone: String,
+        monthlyFee: Double,
+        admissionDate: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        val user = activeUser.value ?: return onResult(false, "লগইন করা প্রয়োজন")
+        viewModelScope.launch {
+            try {
+                repository.updateStudent(
+                    studentUuid = studentUuid,
+                    userUuid = user.uuid,
+                    roll = roll,
+                    name = name,
+                    phone = phone,
+                    monthlyFee = monthlyFee,
+                    admissionDate = admissionDate
+                )
+                loadFeeSummariesForSelectedClass()
+                onResult(true, "শিক্ষার্থীর তথ্য সফলভাবে আপডেট হয়েছে")
+            } catch (e: Exception) {
+                onResult(false, e.localizedMessage ?: "শিক্ষার্থী আপডেট ব্যর্থ হয়েছে")
+            }
         }
     }
 

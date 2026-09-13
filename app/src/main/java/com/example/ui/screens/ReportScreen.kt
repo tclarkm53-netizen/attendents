@@ -379,8 +379,8 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                                 return@OutlinedButton
                             }
                             val pdf = PdfReportGenerator.generateClassReportPdf(context, report, institution)
-                            val uri = PdfReportGenerator.savePdfToDownloads(context, pdf)
-                            Toast.makeText(context, if (uri != null) "PDF সংরক্ষিত: Downloads/AttendanceReports" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
+                            val res = PdfReportGenerator.savePdfToAttendentFolder(context, pdf)
+                            Toast.makeText(context, if (res.uri != null) "PDF সংরক্ষিত: attendent ফোল্ডারে" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
                         } else {
                             val report = studentReportData
                             if (report == null) {
@@ -388,8 +388,8 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                                 return@OutlinedButton
                             }
                             val pdf = PdfReportGenerator.generateStudentReportPdf(context, report, institution)
-                            val uri = PdfReportGenerator.savePdfToDownloads(context, pdf)
-                            Toast.makeText(context, if (uri != null) "PDF সংরক্ষিত: Downloads/AttendanceReports" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
+                            val res = PdfReportGenerator.savePdfToAttendentFolder(context, pdf)
+                            Toast.makeText(context, if (res.uri != null) "PDF সংরক্ষিত: attendent ফোল্ডারে" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
                         }
                     },
                     modifier = Modifier
@@ -437,8 +437,8 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                     PdfReportGenerator.printPdf(context, pdf, "Custom_ReportCard_${studentReportData?.student?.name ?: "Student"}")
                 },
                 onSaveCustomCard = { pdf ->
-                    val uri = PdfReportGenerator.savePdfToDownloads(context, pdf)
-                    Toast.makeText(context, if (uri != null) "কাস্টমাইজড রিপোর্ট কার্ড সেভ হয়েছে: Downloads/AttendanceReports" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
+                    val res = PdfReportGenerator.savePdfToAttendentFolder(context, pdf)
+                    Toast.makeText(context, if (res.uri != null) "কাস্টমাইজড রিপোর্ট কার্ড সেভ হয়েছে: attendent ফোল্ডারে" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
                 },
                 onShareCustomCard = { pdf ->
                     try {

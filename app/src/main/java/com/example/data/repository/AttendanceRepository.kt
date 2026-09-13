@@ -274,6 +274,26 @@ class AttendanceRepository(private val context: Context) {
         triggerSync(userUuid)
     }
 
+    suspend fun updateStudent(
+        studentUuid: String,
+        userUuid: String,
+        roll: String,
+        name: String,
+        phone: String,
+        monthlyFee: Double,
+        admissionDate: String
+    ) = withContext(Dispatchers.IO) {
+        studentDao.updateStudentDetails(
+            uuid = studentUuid,
+            roll = roll.trim(),
+            name = name.trim(),
+            phone = phone.trim(),
+            monthlyFee = monthlyFee,
+            admissionDate = admissionDate.trim()
+        )
+        triggerSync(userUuid)
+    }
+
     suspend fun deleteStudent(studentUuid: String, userUuid: String) = withContext(Dispatchers.IO) {
         studentDao.softDelete(studentUuid)
         triggerSync(userUuid)
@@ -306,6 +326,7 @@ class AttendanceRepository(private val context: Context) {
         val datePart = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
         val randPart = (1000..9999).random()
         val generatedReceipt = receiptNo.ifBlank { "REC-$datePart-$randPart" }
+        val now = System.currentTimeMillis()
 
         val payment = FeePaymentEntity(
             uuid = UUID.randomUUID().toString(),
@@ -317,7 +338,9 @@ class AttendanceRepository(private val context: Context) {
             receiptNo = generatedReceipt,
             monthCovered = monthCovered,
             note = note.trim(),
-            createdAt = System.currentTimeMillis(),
+            isDeleted = false,
+            createdAt = now,
+            updatedAt = now,
             isSynced = false
         )
         feePaymentDao.insertOrUpdate(payment)
@@ -341,12 +364,8 @@ class AttendanceRepository(private val context: Context) {
         val diffMillis = maxOf(0L, now.time - startDate.time)
         val elapsedDays = (diffMillis / (1000L * 60 * 60 * 24))
 
-        val calStart = Calendar.getInstance().apply { time = startDate }
-        val calNow = Calendar.getInstance().apply { time = now }
-        val diffYear = calNow.get(Calendar.YEAR) - calStart.get(Calendar.YEAR)
-        val diffMonth = calNow.get(Calendar.MONTH) - calStart.get(Calendar.MONTH)
-        // Day and calendar count - student starts at month 1 of enrollment
-        val elapsedMonths = maxOf(1, (diffYear * 12) + diffMonth + 1)
+        // Rule: Monthly fee is counted only after 30 days of admission date (before 30 days = 0 months bill)
+        val elapsedMonths = (elapsedDays / 30).toInt()
 
         val totalPayable = elapsedMonths * monthlyFee
         val dueAmount = maxOf(0.0, totalPayable - totalPaid)
@@ -583,6 +602,7 @@ class AttendanceRepository(private val context: Context) {
             val paymentDtos = unsyncedPayments.map {
                 SyncPaymentDto(
                     uuid = it.uuid,
+                    userUuid = it.userUuid,
                     studentUuid = it.studentUuid,
                     classUuid = it.classUuid,
                     amountPaid = it.amountPaid,
@@ -590,7 +610,9 @@ class AttendanceRepository(private val context: Context) {
                     receiptNo = it.receiptNo,
                     monthCovered = it.monthCovered,
                     note = it.note,
-                    createdAt = it.createdAt
+                    isDeleted = if (it.isDeleted) 1 else 0,
+                    createdAt = it.createdAt,
+                    updatedAt = it.updatedAt
                 )
             }
 
@@ -693,7 +715,9 @@ class AttendanceRepository(private val context: Context) {
                             receiptNo = it.receiptNo ?: "",
                             monthCovered = it.monthCovered ?: "",
                             note = it.note ?: "",
+                            isDeleted = it.isDeleted == 1,
                             createdAt = it.createdAt,
+                            updatedAt = it.updatedAt,
                             isSynced = true
                         )
                     }

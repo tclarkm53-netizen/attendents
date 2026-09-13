@@ -75,7 +75,9 @@ data class FeePaymentEntity(
     val receiptNo: String = "",
     val monthCovered: String = "",
     val note: String = "",
+    val isDeleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false
 )
 

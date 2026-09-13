@@ -95,6 +95,9 @@ interface StudentDao {
     @Query("UPDATE students SET monthlyFee = :monthlyFee, updatedAt = :timestamp, isSynced = 0 WHERE uuid = :uuid")
     suspend fun updateMonthlyFee(uuid: String, monthlyFee: Double, timestamp: Long = System.currentTimeMillis())
 
+    @Query("UPDATE students SET rollNumber = :roll, name = :name, phone = :phone, monthlyFee = :monthlyFee, admissionDate = :admissionDate, updatedAt = :timestamp, isSynced = 0 WHERE uuid = :uuid")
+    suspend fun updateStudentDetails(uuid: String, roll: String, name: String, phone: String, monthlyFee: Double, admissionDate: String, timestamp: Long = System.currentTimeMillis())
+
     @Query("SELECT COUNT(*) FROM students WHERE userUuid = :userUuid AND isDeleted = 0")
     fun getStudentCount(userUuid: String): Flow<Int>
 
@@ -140,22 +143,22 @@ interface AttendanceDao {
 
 @Dao
 interface FeePaymentDao {
-    @Query("SELECT * FROM fee_payments WHERE studentUuid = :studentUuid ORDER BY createdAt DESC")
+    @Query("SELECT * FROM fee_payments WHERE studentUuid = :studentUuid AND isDeleted = 0 ORDER BY createdAt DESC")
     fun getPaymentsForStudent(studentUuid: String): Flow<List<FeePaymentEntity>>
 
-    @Query("SELECT * FROM fee_payments WHERE studentUuid = :studentUuid ORDER BY createdAt DESC")
+    @Query("SELECT * FROM fee_payments WHERE studentUuid = :studentUuid AND isDeleted = 0 ORDER BY createdAt DESC")
     suspend fun getPaymentsListForStudent(studentUuid: String): List<FeePaymentEntity>
 
-    @Query("SELECT * FROM fee_payments WHERE userUuid = :userUuid ORDER BY createdAt DESC")
+    @Query("SELECT * FROM fee_payments WHERE userUuid = :userUuid AND isDeleted = 0 ORDER BY createdAt DESC")
     fun getAllPaymentsForUser(userUuid: String): Flow<List<FeePaymentEntity>>
 
-    @Query("SELECT * FROM fee_payments WHERE classUuid = :classUuid ORDER BY createdAt DESC")
+    @Query("SELECT * FROM fee_payments WHERE classUuid = :classUuid AND isDeleted = 0 ORDER BY createdAt DESC")
     fun getPaymentsForClass(classUuid: String): Flow<List<FeePaymentEntity>>
 
-    @Query("SELECT COALESCE(SUM(amountPaid), 0.0) FROM fee_payments WHERE studentUuid = :studentUuid")
+    @Query("SELECT COALESCE(SUM(amountPaid), 0.0) FROM fee_payments WHERE studentUuid = :studentUuid AND isDeleted = 0")
     fun getTotalPaidForStudent(studentUuid: String): Flow<Double>
 
-    @Query("SELECT COALESCE(SUM(amountPaid), 0.0) FROM fee_payments WHERE studentUuid = :studentUuid")
+    @Query("SELECT COALESCE(SUM(amountPaid), 0.0) FROM fee_payments WHERE studentUuid = :studentUuid AND isDeleted = 0")
     suspend fun getTotalPaidAmountForStudent(studentUuid: String): Double
 
     @Query("SELECT * FROM fee_payments WHERE isSynced = 0 AND userUuid = :userUuid")
@@ -169,6 +172,9 @@ interface FeePaymentDao {
 
     @Query("UPDATE fee_payments SET isSynced = 1 WHERE uuid IN (:uuids)")
     suspend fun markAsSynced(uuids: List<String>)
+
+    @Query("UPDATE fee_payments SET isDeleted = 1, isSynced = 0, updatedAt = :timestamp WHERE uuid = :uuid")
+    suspend fun softDelete(uuid: String, timestamp: Long = System.currentTimeMillis())
 
     @Query("SELECT COUNT(*) FROM fee_payments WHERE isSynced = 0 AND userUuid = :userUuid")
     fun getUnsyncedCount(userUuid: String): Flow<Int>

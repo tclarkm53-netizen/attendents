@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Class
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
@@ -53,6 +54,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -94,6 +96,7 @@ fun ClassStudentScreen(viewModel: AttendanceViewModel) {
     var showAddStudentDialog by remember { mutableStateOf(false) }
     var classToDelete by remember { mutableStateOf<ClassEntity?>(null) }
     var studentToDelete by remember { mutableStateOf<StudentEntity?>(null) }
+    var studentToEdit by remember { mutableStateOf<StudentEntity?>(null) }
 
     var studentSearchQuery by remember { mutableStateOf("") }
 
@@ -384,18 +387,54 @@ fun ClassStudentScreen(viewModel: AttendanceViewModel) {
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.padding(top = 2.dp)
+                                                ) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                                    ) {
+                                                        Text(
+                                                            text = "মাসিক বেতন: ৳${student.monthlyFee.toInt()}",
+                                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "ভর্তি: ${student.admissionDate}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
                                             }
                                         }
 
-                                        IconButton(
-                                            onClick = { studentToDelete = student },
-                                            modifier = Modifier.size(34.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = "Delete Student",
-                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-                                            )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            IconButton(
+                                                onClick = { studentToEdit = student },
+                                                modifier = Modifier.size(34.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = "Edit Student",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { studentToDelete = student },
+                                                modifier = Modifier.size(34.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = "Delete Student",
+                                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -719,6 +758,115 @@ fun ClassStudentScreen(viewModel: AttendanceViewModel) {
                 },
                 dismissButton = {
                     TextButton(onClick = { classToDelete = null }) { Text("বাতিল") }
+                }
+            )
+        }
+
+        // Edit Student Dialog
+        if (studentToEdit != null) {
+            val student = studentToEdit!!
+            var editRoll by remember(student) { mutableStateOf(student.rollNumber) }
+            var editName by remember(student) { mutableStateOf(student.name) }
+            var editPhone by remember(student) { mutableStateOf(student.phone) }
+            var editMonthlyFeeStr by remember(student) { mutableStateOf(student.monthlyFee.toInt().toString()) }
+            var editAdmissionDate by remember(student) { mutableStateOf(student.admissionDate) }
+
+            val editCal = Calendar.getInstance()
+            val editDatePicker = remember(student) {
+                DatePickerDialog(
+                    context,
+                    { _, y, m, d ->
+                        editAdmissionDate = String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d)
+                    },
+                    editCal.get(Calendar.YEAR),
+                    editCal.get(Calendar.MONTH),
+                    editCal.get(Calendar.DAY_OF_MONTH)
+                )
+            }
+
+            AlertDialog(
+                onDismissRequest = { studentToEdit = null },
+                title = { Text("শিক্ষার্থীর তথ্য ও মাসিক বিল পরিবর্তন", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = editRoll,
+                            onValueChange = { editRoll = it },
+                            label = { Text("রোল নম্বর (Roll Number)*") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = editName,
+                            onValueChange = { editName = it },
+                            label = { Text("শিক্ষার্থীর নাম (Student Name)*") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = editMonthlyFeeStr,
+                            onValueChange = { editMonthlyFeeStr = it },
+                            label = { Text("মাসিক বিল / বেতন (টাকা)*") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = editAdmissionDate,
+                            onValueChange = { editAdmissionDate = it },
+                            label = { Text("ভর্তির তারিখ (YYYY-MM-DD)*") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { editDatePicker.show() }) {
+                                    Icon(Icons.Default.CalendarMonth, contentDescription = "Pick Date")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = editPhone,
+                            onValueChange = { editPhone = it },
+                            label = { Text("অভিভাবকের ফোন নম্বর") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (editRoll.isBlank() || editName.isBlank()) {
+                                Toast.makeText(context, "রোল এবং নাম আবশ্যক", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val parsedFee = editMonthlyFeeStr.toDoubleOrNull() ?: student.monthlyFee
+                            viewModel.updateStudent(
+                                studentUuid = student.uuid,
+                                roll = editRoll,
+                                name = editName,
+                                phone = editPhone,
+                                monthlyFee = parsedFee,
+                                admissionDate = editAdmissionDate
+                            ) { success, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                if (success) {
+                                    studentToEdit = null
+                                }
+                            }
+                        }
+                    ) {
+                        Text("সংরক্ষণ করুন")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { studentToEdit = null }) {
+                        Text("বাতিল")
+                    }
                 }
             )
         }

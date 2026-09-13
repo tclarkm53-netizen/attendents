@@ -151,13 +151,7 @@ fun AttendanceScreen(
 
     visibleStudents.forEach { s ->
         val record = attendanceMap[s.uuid]
-        val effectiveStatus = if (record != null) {
-            record.first
-        } else if (isToday) {
-            "PRESENT"
-        } else {
-            "UNRECORDED"
-        }
+        val effectiveStatus = record?.first ?: "PRESENT"
         when (effectiveStatus) {
             "PRESENT" -> presentCount++
             "ABSENT" -> absentCount++
@@ -276,7 +270,7 @@ fun AttendanceScreen(
                             .fillMaxWidth()
                             .padding(top = 8.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isToday) PresentContainer else MaterialTheme.colorScheme.surfaceVariant
+                            containerColor = if (isToday) PresentContainer else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                         ),
                         shape = RoundedCornerShape(8.dp)
                     ) {
@@ -292,7 +286,7 @@ fun AttendanceScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
-                                    imageVector = if (isToday) Icons.Default.CheckCircle else Icons.Default.Lock,
+                                    imageVector = if (isToday) Icons.Default.CheckCircle else Icons.Default.CalendarMonth,
                                     contentDescription = null,
                                     tint = if (isToday) PresentGreen else MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
@@ -300,12 +294,11 @@ fun AttendanceScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = if (isToday) "🟢 আজকের হাজিরা গ্রহণ ও পরিবর্তন চালু আছে"
-                                    else if (isPast) "🔒 পুরাতন হাজিরা (কেবল দেখার জন্য, পরিবর্তন বন্ধ)"
-                                    else "🔒 ভবিষ্যতের তারিখ (হাজিরা পরিবর্তন বন্ধ)",
+                                    else "📅 নির্বাচিত তারিখের (${selectedDate}) হাজিরা পরিবর্তন চালু আছে",
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium
+                                        fontWeight = FontWeight.Bold
                                     ),
-                                    color = if (isToday) PresentOnContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (isToday) PresentOnContainer else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                             if (!isToday) {
@@ -334,8 +327,8 @@ fun AttendanceScreen(
                         StatBadge(label = "দেরি", count = lateCount, color = LateAmber, modifier = Modifier.weight(1f))
                     }
 
-                    // Quick Actions (Mark All) - Only enabled & visible for TODAY
-                    if (isToday) {
+                    // Quick Actions (Mark All)
+                    if (visibleStudents.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -418,42 +411,20 @@ fun AttendanceScreen(
                 ) {
                     items(visibleStudents, key = { it.uuid }) { student ->
                         val record = attendanceMap[student.uuid]
-                        val currentStatus = if (record != null) {
-                            record.first
-                        } else if (isToday) {
-                            "PRESENT"
-                        } else {
-                            "UNRECORDED"
-                        }
+                        val currentStatus = record?.first ?: "PRESENT"
                         val currentRemarks = record?.second ?: ""
 
                         StudentAttendanceCard(
                             student = student,
                             status = currentStatus,
                             remarks = currentRemarks,
-                            isEditable = isToday,
+                            isEditable = true,
                             onStatusSelected = { newStatus ->
-                                if (isToday) {
-                                    viewModel.markStudent(student.uuid, newStatus)
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        "শুধুমাত্র আজকের ($todayDateStr) হাজিরা পরিবর্তন করা যাবে",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
+                                viewModel.markStudent(student.uuid, newStatus)
                             },
                             onEditRemarks = {
-                                if (isToday) {
-                                    editingRemarksStudent = student
-                                    currentRemarksText = currentRemarks
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        "শুধুমাত্র আজকের ($todayDateStr) হাজিরা মন্তব্য পরিবর্তন করা যাবে",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
+                                editingRemarksStudent = student
+                                currentRemarksText = currentRemarks
                             }
                         )
                     }
@@ -461,8 +432,8 @@ fun AttendanceScreen(
             }
         }
 
-        // Save Attendance Floating Action Button - Only available on TODAY
-        if (isToday && visibleStudents.isNotEmpty()) {
+        // Save Attendance Floating Action Button - Available for any selected date
+        if (visibleStudents.isNotEmpty()) {
             FloatingActionButton(
                 onClick = {
                     viewModel.saveAttendance { success, msg ->
