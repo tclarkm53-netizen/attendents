@@ -89,7 +89,7 @@ object PdfReportGenerator {
         canvas.drawText(classTitle + subjectInfo, MARGIN, y, textPaint)
         y += 14f
 
-        val periodText = "Period: ${report.fromDate} to ${report.toDate}  |  Generated on: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())}"
+        val periodText = "Period: ${report.fromDate} to ${report.toDate}  |  Fridays Auto-Skipped (6 Days/Wk, 24 Days/Mo = 100%)"
         canvas.drawText(periodText, MARGIN, y, subPaint)
         y += 16f
 
@@ -261,7 +261,7 @@ object PdfReportGenerator {
         canvas.drawText(classInfo, MARGIN, y, textPaint)
         y += 14f
 
-        val periodText = "Period: ${report.fromDate} to ${report.toDate}  |  Generated on: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())}"
+        val periodText = "Period: ${report.fromDate} to ${report.toDate}  |  Fridays Auto-Skipped (6 Days/Wk, 24 Days/Mo = 100%)"
         canvas.drawText(periodText, MARGIN, y, subPaint)
         y += 18f
 

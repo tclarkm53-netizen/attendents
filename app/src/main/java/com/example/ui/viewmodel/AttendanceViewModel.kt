@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -65,9 +66,11 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     val selectedDate: StateFlow<String> = _selectedDate.asStateFlow()
 
     // Students in selected class
-    val studentsInSelectedClass: StateFlow<List<StudentEntity>> = _selectedClass.flatMapLatest { cls ->
-        if (cls != null) {
-            repository.getStudentsByClass(cls.uuid)
+    val studentsInSelectedClass: StateFlow<List<StudentEntity>> = combine(_selectedClass, activeUser) { cls, user ->
+        Pair(cls, user)
+    }.flatMapLatest { (cls, user) ->
+        if (cls != null && user != null) {
+            repository.getStudentsByClass(cls.uuid, user.uuid)
         } else {
             flowOf(emptyList())
         }
@@ -118,6 +121,13 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
                     repository.getUnsyncedCount(user.uuid).collect { count ->
                         _unsyncedCount.value = count
                     }
+                } else {
+                    _selectedClass.value = null
+                    _attendanceMap.value = emptyMap()
+                    _classReportData.value = null
+                    _studentReportData.value = null
+                    _classFeeSummaries.value = emptyList()
+                    _unsyncedCount.value = 0
                 }
             }
         }
@@ -220,10 +230,14 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
             _attendanceMap.value = emptyMap()
             return
         }
+        val user = activeUser.value ?: run {
+            _attendanceMap.value = emptyMap()
+            return
+        }
         val date = _selectedDate.value
         attendanceJob?.cancel()
         attendanceJob = viewModelScope.launch {
-            repository.getAttendanceForClassAndDate(cls.uuid, date).collect { records ->
+            repository.getAttendanceForClassAndDate(cls.uuid, date, user.uuid).collect { records ->
                 val map = records.associate { it.studentUuid to Pair(it.status, it.remarks) }
                 _attendanceMap.value = map
             }
@@ -248,6 +262,10 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         _attendanceMap.value = current
     }
 
+    fun unmarkAll() {
+        _attendanceMap.value = emptyMap()
+    }
+
     fun saveAttendance(onComplete: (Boolean, String) -> Unit) {
         val user = activeUser.value ?: return onComplete(false, "লগইন করা আবশ্যক")
         val cls = _selectedClass.value ?: return onComplete(false, "কোনো ক্লাস নির্বাচন করা হয়নি")
@@ -259,12 +277,16 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         val currentMap = _attendanceMap.value
-        val completeMap = mutableMapOf<String, Pair<String, String>>()
+        val markedMap = mutableMapOf<String, Pair<String, String>>()
         for (s in admittedStudents) {
             val existing = currentMap[s.uuid]
-            val status = existing?.first ?: "PRESENT"
-            val remarks = existing?.second ?: ""
-            completeMap[s.uuid] = Pair(status, remarks)
+            if (existing != null && existing.first.isNotBlank()) {
+                markedMap[s.uuid] = existing
+            }
+        }
+
+        if (markedMap.isEmpty()) {
+            return onComplete(false, "কোনো শিক্ষার্থীর হাজিরা নির্বাচন করা হয়নি। অনুগ্রহ করে শিক্ষার্থীদের হাজিরা দিন অথবা 'সবাই উপস্থিত' চাপুন।")
         }
 
         viewModelScope.launch {
@@ -274,10 +296,10 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
                     userUuid = user.uuid,
                     classUuid = cls.uuid,
                     date = date,
-                    studentStatusMap = completeMap
+                    studentStatusMap = markedMap
                 )
                 _isSaving.value = false
-                onComplete(true, "$date তারিখের হাজিরা সফলভাবে সংরক্ষিত হয়েছে")
+                onComplete(true, "$date তারিখের (${markedMap.size} জনের) হাজিরা সফলভাবে সংরক্ষিত হয়েছে")
             } catch (e: Exception) {
                 _isSaving.value = false
                 onComplete(false, "সংরক্ষণ ব্যর্থ: ${e.localizedMessage}")
@@ -382,12 +404,13 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     fun loadFeeSummariesForSelectedClass() {
         val cls = _selectedClass.value ?: return
+        val user = activeUser.value ?: return
         viewModelScope.launch {
             _isFeeLoading.value = true
             try {
                 val students = studentsInSelectedClass.value
                 val summaries = students.map { student ->
-                    repository.calculateStudentFeeSummary(student)
+                    repository.calculateStudentFeeSummary(student, user.uuid)
                 }
                 _classFeeSummaries.value = summaries
             } catch (e: Exception) {
@@ -430,7 +453,21 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun getPaymentsForStudent(studentUuid: String) = repository.getPaymentsForStudent(studentUuid)
+    fun getPaymentsForStudent(studentUuid: String) =
+        repository.getPaymentsForStudent(studentUuid, activeUser.value?.uuid)
+
+    fun deleteFeePayment(paymentUuid: String, onResult: (Boolean, String) -> Unit) {
+        val user = activeUser.value ?: return onResult(false, "লগইন প্রয়োজন")
+        viewModelScope.launch {
+            try {
+                repository.deleteFeePayment(paymentUuid, user.uuid)
+                loadFeeSummariesForSelectedClass()
+                onResult(true, "পেমেন্ট সফলভাবে ডিলিট করা হয়েছে")
+            } catch (e: Exception) {
+                onResult(false, "পেমেন্ট ডিলিট ব্যর্থ: ${e.localizedMessage}")
+            }
+        }
+    }
 
     // --- Auth Actions ---
 
@@ -456,11 +493,26 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun registerOffline(name: String, email: String, inst: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = repository.registerLocally(name, email, inst)
+            if (result.isSuccess) {
+                onResult(true, "অফলাইন একাউন্ট সফলভাবে তৈরি হয়েছে!")
+            } else {
+                onResult(false, result.exceptionOrNull()?.message ?: "অফলাইন একাউন্ট তৈরি ব্যর্থ হয়েছে")
+            }
+        }
+    }
+
     fun logout() {
         viewModelScope.launch {
-            repository.logout()
             _selectedClass.value = null
             _attendanceMap.value = emptyMap()
+            _classReportData.value = null
+            _studentReportData.value = null
+            _classFeeSummaries.value = emptyList()
+            _unsyncedCount.value = 0
+            repository.logout()
         }
     }
 
@@ -502,7 +554,8 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     fun loadClassReport(classUuid: String, fromDate: String, toDate: String) {
         viewModelScope.launch {
             _isReportLoading.value = true
-            val data = repository.getClassReport(classUuid, fromDate, toDate)
+            val user = activeUser.value
+            val data = repository.getClassReport(classUuid, fromDate, toDate, user?.uuid)
             _classReportData.value = data
             _isReportLoading.value = false
         }
@@ -511,7 +564,8 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     fun loadStudentReport(studentUuid: String, fromDate: String, toDate: String) {
         viewModelScope.launch {
             _isReportLoading.value = true
-            val data = repository.getStudentReport(studentUuid, fromDate, toDate)
+            val user = activeUser.value
+            val data = repository.getStudentReport(studentUuid, fromDate, toDate, user?.uuid)
             _studentReportData.value = data
             _isReportLoading.value = false
         }

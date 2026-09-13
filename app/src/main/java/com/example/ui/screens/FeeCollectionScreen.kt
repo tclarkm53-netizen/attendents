@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
@@ -763,8 +764,10 @@ fun PaymentHistoryDialog(
     viewModel: AttendanceViewModel,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val paymentsFlow = remember(student.uuid) { viewModel.getPaymentsForStudent(student.uuid) }
     val payments by paymentsFlow.collectAsState(initial = emptyList())
+    var paymentToDelete by remember { mutableStateOf<FeePaymentEntity?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -814,11 +817,25 @@ fun PaymentHistoryDialog(
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             color = PresentGreen
                                         )
-                                        Text(
-                                            text = payment.paymentDate,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = payment.paymentDate,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            IconButton(
+                                                onClick = { paymentToDelete = payment },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = "Delete Payment",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Row(
@@ -855,6 +872,35 @@ fun PaymentHistoryDialog(
             Button(onClick = onDismiss) { Text("ঠিক আছে") }
         }
     )
+
+    if (paymentToDelete != null) {
+        val p = paymentToDelete!!
+        AlertDialog(
+            onDismissRequest = { paymentToDelete = null },
+            title = { Text("পেমেন্ট ডিলিট নিশ্চিতকরণ") },
+            text = {
+                Text("আপনি কি নিশ্চিতভাবে এই রসিদের পেমেন্ট (৳${p.amountPaid.toInt()} টাকা, রসিদ: ${p.receiptNo}) ডিলিট করতে চান? এটি অ্যাপ এবং ক্লাউড সার্ভার উভয় থেকে স্থায়ীভাবে মুছে যাবে।")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteFeePayment(p.uuid) { success, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        }
+                        paymentToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("ডিলিট করুন")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { paymentToDelete = null }) {
+                    Text("বাতিল")
+                }
+            }
+        )
+    }
 }
 
 @Composable

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Preview
@@ -58,6 +59,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
+import com.example.data.repository.getBengaliDayOfWeek
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -119,6 +121,40 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
     var fromDate by remember { mutableStateOf(dateFormat.format(startOfMonthCal.time)) }
     var toDate by remember { mutableStateOf(dateFormat.format(now.time)) }
     var datePreset by remember { mutableStateOf("THIS_MONTH") }
+
+    val fromCalendar = Calendar.getInstance()
+    val fromDatePickerDialog = remember(context) {
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val selectedCal = Calendar.getInstance().apply {
+                    set(year, month, dayOfMonth)
+                }
+                fromDate = dateFormat.format(selectedCal.time)
+                datePreset = "CUSTOM"
+            },
+            fromCalendar.get(Calendar.YEAR),
+            fromCalendar.get(Calendar.MONTH),
+            fromCalendar.get(Calendar.DAY_OF_MONTH)
+        )
+    }
+
+    val toCalendar = Calendar.getInstance()
+    val toDatePickerDialog = remember(context) {
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val selectedCal = Calendar.getInstance().apply {
+                    set(year, month, dayOfMonth)
+                }
+                toDate = dateFormat.format(selectedCal.time)
+                datePreset = "CUSTOM"
+            },
+            toCalendar.get(Calendar.YEAR),
+            toCalendar.get(Calendar.MONTH),
+            toCalendar.get(Calendar.DAY_OF_MONTH)
+        )
+    }
 
     val classReportData by viewModel.classReportData.collectAsState()
     val studentReportData by viewModel.studentReportData.collectAsState()
@@ -276,7 +312,7 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Date Presets
+                // Date Presets (চলতি মাস, গত ৩০ দিন, কাষ্টম ডেট)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -308,24 +344,68 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                     )
 
                     FilterChip(
-                        selected = datePreset == "TODAY",
+                        selected = datePreset == "CUSTOM",
                         onClick = {
-                            datePreset = "TODAY"
-                            val todayStr = dateFormat.format(Date())
-                            fromDate = todayStr
-                            toDate = todayStr
+                            datePreset = "CUSTOM"
+                            fromDatePickerDialog.show()
                         },
-                        label = { Text("আজকে", fontSize = 11.sp) },
+                        label = { Text("কাষ্টম ডেট", fontSize = 11.sp) },
                         modifier = Modifier.weight(1f)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "সময়কাল: $fromDate থেকে $toDate",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Custom Date Range Interactive Selector
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { fromDatePickerDialog.show() },
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("শুরুর তারিখ", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(fromDate, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+
+                    Text("থেকে", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { toDatePickerDialog.show() },
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("শেষের তারিখ", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(toDate, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -512,6 +592,33 @@ fun ClassReportView(report: com.example.data.repository.ClassReportData?) {
                                 .clip(RoundedCornerShape(4.dp)),
                             color = if (report.overallPercentage >= 75f) PresentGreen else AbsentRed
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.EventBusy,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "🕌 শুক্রবার অটো-স্কিপ: সাপ্তাহিক ছুটি বাদ দিয়ে সপ্তাহে ৬ দিন ও মাসে ২৪ দিন কার্যদিবস হিসেবে ১০০% উপস্থিতি নির্ণিত",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -640,6 +747,33 @@ fun StudentReportView(
                                 Text("উপস্থিতির হার", style = MaterialTheme.typography.labelSmall)
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.EventBusy,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "🕌 শুক্রবার অটো-স্কিপ: শুক্রবার বাদ দিয়ে সপ্তাহে ৬ দিন ও মাসে ২৪ দিন কার্যদিবস হিসেবে ১০০% উপস্থিতি নির্ণিত",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -653,6 +787,7 @@ fun StudentReportView(
             }
 
             items(report.records, key = { it.uuid }) { record ->
+                val dayOfWeekBangla = getBengaliDayOfWeek(record.date)
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
@@ -666,7 +801,18 @@ fun StudentReportView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text(text = record.date, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = record.date, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                if (dayOfWeekBangla.isNotBlank()) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "• $dayOfWeekBangla",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                             if (record.remarks.isNotBlank()) {
                                 Text(
                                     text = "মন্তব্য: ${record.remarks}",

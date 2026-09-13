@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -224,13 +225,59 @@ fun AuthScreen(viewModel: AttendanceViewModel) {
                     )
 
                     if (errorMessage != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = errorMessage ?: "",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()
-                        )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = errorMessage ?: "",
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                if (selectedTab == 1) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (name.isBlank() || email.isBlank()) {
+                                                errorMessage = "নাম এবং ইমেইল প্রদান করা আবশ্যক।"
+                                                return@OutlinedButton
+                                            }
+                                            isLoading = true
+                                            viewModel.registerOffline(name, email, institution) { success, msg ->
+                                                isLoading = false
+                                                if (success) {
+                                                    Toast.makeText(context, "অফলাইন একাউন্ট সফলভাবে তৈরি হয়েছে!", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    errorMessage = msg
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("register_offline_button"),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("সার্ভার ছাড়াই অফলাইনে একাউন্ট খুলুন", fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))

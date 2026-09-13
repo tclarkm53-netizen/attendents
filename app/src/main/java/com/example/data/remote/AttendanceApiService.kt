@@ -3,8 +3,12 @@ package com.example.data.remote
 import android.content.Context
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
+import org.json.JSONObject
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -75,6 +79,98 @@ class FlexibleLongAdapter {
     }
 }
 
+class ServerResponseSanitizerInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
+        val responseBody = response.body ?: return response
+
+        val rawBody = responseBody.string()
+        val trimmed = rawBody.trim().removePrefix("\uFEFF").trim()
+
+        // 1. Check if the body is already valid JSON
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            val mediaType = responseBody.contentType() ?: "application/json; charset=utf-8".toMediaType()
+            return response.newBuilder()
+                .body(trimmed.toResponseBody(mediaType))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .build()
+        }
+
+        // 2. Check if a valid JSON object is embedded after PHP warnings/notices
+        val firstBrace = trimmed.indexOf('{')
+        val lastBrace = trimmed.lastIndexOf('}')
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            val potentialJson = trimmed.substring(firstBrace, lastBrace + 1)
+            try {
+                JSONObject(potentialJson)
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                return response.newBuilder()
+                    .body(potentialJson.toResponseBody(mediaType))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .build()
+            } catch (_: Exception) {
+                // Proceed to HTML error extraction
+            }
+        }
+
+        // 3. Extract meaningful error message from HTML / PHP errors
+        val cleanMessage = parseServerHtmlError(trimmed, response.code)
+
+        val escapedMsg = cleanMessage.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", "")
+        val syntheticJson = "{\"success\":false,\"message\":\"$escapedMsg\",\"timestamp\":${System.currentTimeMillis()}}"
+
+        val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+        return response.newBuilder()
+            .code(if (response.code in 200..299) 200 else response.code)
+            .body(syntheticJson.toResponseBody(jsonMediaType))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .build()
+    }
+
+    private fun parseServerHtmlError(raw: String, httpCode: Int): String {
+        val unescaped = raw
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&#039;", "'")
+
+        if (unescaped.contains("Parse error", ignoreCase = true) || unescaped.contains("syntax error", ignoreCase = true)) {
+            val clean = unescaped.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+            val shortDesc = if (clean.length > 200) clean.take(200) + "..." else clean
+            return "সার্ভার পিএইচপি সিনট্যাক্স এরর ($shortDesc)। অনুগ্রহ করে সার্ভারের db.php ফাইলের ২২-২৩ নম্বর লাইনে কোটেশন ও সেমিকোলন (;) ঠিক করুন।"
+        }
+
+        if (unescaped.contains("Fatal error", ignoreCase = true)) {
+            val clean = unescaped.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+            val shortDesc = if (clean.length > 180) clean.take(180) + "..." else clean
+            return "সার্ভার পিএইচপি ক্র্যাশ ($shortDesc)।"
+        }
+
+        if (unescaped.contains("Database connection failed", ignoreCase = true) || unescaped.contains("PDOException", ignoreCase = true)) {
+            return "সার্ভার ডাটাবেজ কানেকশন ব্যর্থ হয়েছে। db.php ফাইলের ডাটাবেজ হোস্ট, নাম, ইউজারনেম ও পাসওয়ার্ড সঠিক আছে কিনা পরীক্ষা করুন।"
+        }
+
+        if (httpCode == 404 || unescaped.contains("404 Not Found", ignoreCase = true)) {
+            return "সার্ভার ফাইল পাওয়া যায়নি (404 Not Found)। সার্ভার URL ও api ফোল্ডারের পাথ চেক করুন।"
+        }
+
+        if (httpCode == 500 || unescaped.contains("500 Internal Server Error", ignoreCase = true)) {
+            return "সার্ভার ইন্টারনাল এরর (HTTP 500)। সার্ভার কনফিগারেশন চেক করুন।"
+        }
+
+        val clean = unescaped.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+        val snippet = if (clean.length > 120) clean.take(120) + "..." else clean
+        return if (snippet.isNotBlank()) {
+            "সার্ভার এরর রেসপন্স: $snippet"
+        } else {
+            "সার্ভার থেকে সঠিক রেসপন্স পাওয়া যায়নি (HTTP $httpCode)।"
+        }
+    }
+}
+
 class ApiClient private constructor(context: Context) {
     private val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
 
@@ -108,6 +204,7 @@ class ApiClient private constructor(context: Context) {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
+        .addInterceptor(ServerResponseSanitizerInterceptor())
         .addInterceptor(loggingInterceptor)
         .build()
 
@@ -149,7 +246,7 @@ class ApiClient private constructor(context: Context) {
             cachedService = Retrofit.Builder()
                 .baseUrl(currentBaseUrl)
                 .client(okHttpClient)
-                .addConverterFactory(MoshiConverterFactory.create(moshi))
+                .addConverterFactory(MoshiConverterFactory.create(moshi).asLenient())
                 .build()
                 .create(AttendanceApiService::class.java)
         }

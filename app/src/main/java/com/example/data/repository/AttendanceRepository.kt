@@ -60,7 +60,8 @@ data class ClassReportData(
     val toDate: String,
     val totalStudents: Int,
     val overallPercentage: Float,
-    val items: List<StudentReportItem>
+    val items: List<StudentReportItem>,
+    val skippedFridaysCount: Int = 0
 )
 
 data class SingleStudentReportData(
@@ -74,8 +75,40 @@ data class SingleStudentReportData(
     val late: Int,
     val excused: Int,
     val percentage: Float,
-    val records: List<AttendanceEntity>
+    val records: List<AttendanceEntity>,
+    val skippedFridaysCount: Int = 0
 )
+
+fun isFridayDate(dateStr: String): Boolean {
+    return try {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val parsed = sdf.parse(dateStr) ?: return false
+        val cal = Calendar.getInstance().apply { time = parsed }
+        cal.get(Calendar.DAY_OF_WEEK) == Calendar.FRIDAY
+    } catch (e: Exception) {
+        false
+    }
+}
+
+fun getBengaliDayOfWeek(dateStr: String): String {
+    return try {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val parsed = sdf.parse(dateStr) ?: return ""
+        val cal = Calendar.getInstance().apply { time = parsed }
+        when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.FRIDAY -> "শুক্রবার (ছুটি)"
+            Calendar.SATURDAY -> "শনিবার"
+            Calendar.SUNDAY -> "রবিবার"
+            Calendar.MONDAY -> "সোমবার"
+            Calendar.TUESDAY -> "মঙ্গলবার"
+            Calendar.WEDNESDAY -> "বুধবার"
+            Calendar.THURSDAY -> "বৃহস্পতিবার"
+            else -> ""
+        }
+    } catch (e: Exception) {
+        ""
+    }
+}
 
 data class StudentFeeSummary(
     val student: StudentEntity,
@@ -152,7 +185,12 @@ class AttendanceRepository(private val context: Context) {
                 }
             } catch (e: Exception) {
                 Log.e("AttendanceRepo", "Online login error: ${e.message}")
-                serverError = e.localizedMessage
+                val msg = e.localizedMessage ?: ""
+                serverError = if (msg.contains("JsonReader") || msg.contains("malformed JSON")) {
+                    "সার্ভার থেকে সঠিক JSON রেসপন্স পাওয়া যায়নি। সার্ভারের PHP কনফিগারেশন বা URL পরীক্ষা করুন।"
+                } else {
+                    msg
+                }
             }
         }
 
@@ -172,7 +210,7 @@ class AttendanceRepository(private val context: Context) {
         val userUuid = UUID.randomUUID().toString()
 
         if (!isNetworkAvailable()) {
-            return@withContext Result.failure(Exception("রেজিস্ট্রেশন করার জন্য ইন্টারনেট সংযোগ আবশ্যক।"))
+            return@withContext Result.failure(Exception("রেজিস্ট্রেশন করার জন্য ইন্টারনেট সংযোগ আবশ্যক। অফলাইনে ব্যবহার করতে চাইলে 'অফলাইনে একাউন্ট খুলুন' ব্যবহার করুন।"))
         }
 
         try {
@@ -199,8 +237,35 @@ class AttendanceRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e("AttendanceRepo", "Online registration error: ${e.message}")
-            return@withContext Result.failure(Exception("সার্ভারে রেজিস্ট্রেশন ব্যর্থ: ${e.localizedMessage ?: "সংযোগ পাওয়া যায়নি"}"))
+            val msg = e.localizedMessage ?: "সংযোগ পাওয়া যায়নি"
+            val cleanMsg = if (msg.contains("JsonReader") || msg.contains("malformed JSON")) {
+                "সার্ভার থেকে সঠিক JSON পাওয়া যায়নি। সার্ভার কনফিগারেশন বা PHP কোড চেক করুন।"
+            } else {
+                msg
+            }
+            return@withContext Result.failure(Exception("সার্ভারে রেজিস্ট্রেশন ব্যর্থ: $cleanMsg"))
         }
+    }
+
+    suspend fun registerLocally(name: String, email: String, inst: String): Result<UserEntity> = withContext(Dispatchers.IO) {
+        val trimmedEmail = email.trim().lowercase()
+        val existing = userDao.getUserByEmail(trimmedEmail)
+        if (existing != null) {
+            val updated = existing.copy(isLoggedIn = true, lastLoginTime = System.currentTimeMillis())
+            userDao.insertOrUpdate(updated)
+            return@withContext Result.success(updated)
+        }
+        val user = UserEntity(
+            uuid = UUID.randomUUID().toString(),
+            name = name.trim(),
+            email = trimmedEmail,
+            institution = inst.trim(),
+            token = "offline_${System.currentTimeMillis()}",
+            isLoggedIn = true,
+            lastLoginTime = System.currentTimeMillis()
+        )
+        userDao.insertOrUpdate(user)
+        Result.success(user)
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {
@@ -234,7 +299,9 @@ class AttendanceRepository(private val context: Context) {
 
     // --- Students ---
 
-    fun getStudentsByClass(classUuid: String): Flow<List<StudentEntity>> = studentDao.getStudentsByClass(classUuid)
+    fun getStudentsByClass(classUuid: String, userUuid: String? = null): Flow<List<StudentEntity>> =
+        if (userUuid != null) studentDao.getStudentsByClass(classUuid, userUuid)
+        else studentDao.getStudentsByClass(classUuid)
 
     fun getAllStudents(userUuid: String): Flow<List<StudentEntity>> = studentDao.getAllStudentsForUser(userUuid)
 
@@ -307,17 +374,24 @@ class AttendanceRepository(private val context: Context) {
 
     // --- Fee Collection & Payments ---
 
-    fun getPaymentsForStudent(studentUuid: String): Flow<List<FeePaymentEntity>> =
-        feePaymentDao.getPaymentsForStudent(studentUuid)
+    fun getPaymentsForStudent(studentUuid: String, userUuid: String? = null): Flow<List<FeePaymentEntity>> =
+        if (userUuid != null) feePaymentDao.getPaymentsForStudent(studentUuid, userUuid)
+        else feePaymentDao.getPaymentsForStudent(studentUuid)
 
     fun getAllPaymentsForUser(userUuid: String): Flow<List<FeePaymentEntity>> =
         feePaymentDao.getAllPaymentsForUser(userUuid)
 
-    fun getPaymentsForClass(classUuid: String): Flow<List<FeePaymentEntity>> =
-        feePaymentDao.getPaymentsForClass(classUuid)
+    fun getPaymentsForClass(classUuid: String, userUuid: String? = null): Flow<List<FeePaymentEntity>> =
+        if (userUuid != null) feePaymentDao.getPaymentsForClass(classUuid, userUuid)
+        else feePaymentDao.getPaymentsForClass(classUuid)
 
     fun getTotalPaidForStudent(studentUuid: String): Flow<Double> =
         feePaymentDao.getTotalPaidForStudent(studentUuid)
+
+    suspend fun deleteFeePayment(paymentUuid: String, userUuid: String) = withContext(Dispatchers.IO) {
+        feePaymentDao.softDelete(paymentUuid)
+        triggerSync(userUuid)
+    }
 
     suspend fun addFeePayment(
         userUuid: String,
@@ -354,8 +428,12 @@ class AttendanceRepository(private val context: Context) {
         payment
     }
 
-    suspend fun calculateStudentFeeSummary(student: StudentEntity): StudentFeeSummary = withContext(Dispatchers.IO) {
-        val totalPaid = feePaymentDao.getTotalPaidAmountForStudent(student.uuid)
+    suspend fun calculateStudentFeeSummary(student: StudentEntity, userUuid: String? = null): StudentFeeSummary = withContext(Dispatchers.IO) {
+        val totalPaid = if (userUuid != null) {
+            feePaymentDao.getTotalPaidAmountForStudent(student.uuid, userUuid)
+        } else {
+            feePaymentDao.getTotalPaidAmountForStudent(student.uuid)
+        }
         val monthlyFee = student.monthlyFee
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
@@ -396,8 +474,9 @@ class AttendanceRepository(private val context: Context) {
 
     // --- Attendance ---
 
-    fun getAttendanceForClassAndDate(classUuid: String, date: String): Flow<List<AttendanceEntity>> =
-        attendanceDao.getAttendanceForClassAndDate(classUuid, date)
+    fun getAttendanceForClassAndDate(classUuid: String, date: String, userUuid: String? = null): Flow<List<AttendanceEntity>> =
+        if (userUuid != null) attendanceDao.getAttendanceForClassAndDate(classUuid, userUuid, date)
+        else attendanceDao.getAttendanceForClassAndDate(classUuid, date)
 
     suspend fun saveAttendance(
         userUuid: String,
@@ -450,11 +529,19 @@ class AttendanceRepository(private val context: Context) {
     suspend fun getClassReport(
         classUuid: String,
         fromDate: String,
-        toDate: String
+        toDate: String,
+        userUuid: String? = null
     ): ClassReportData? = withContext(Dispatchers.IO) {
         val cls = classDao.getClassByUuid(classUuid) ?: return@withContext null
-        val students = studentDao.getStudentsByClassList(classUuid)
-        val attendanceList = attendanceDao.getAttendanceForClassBetweenDates(classUuid, fromDate, toDate)
+        val students = if (userUuid != null) studentDao.getStudentsByClassList(classUuid, userUuid) else studentDao.getStudentsByClassList(classUuid)
+        val rawAttendanceList = if (userUuid != null) attendanceDao.getAttendanceForClassBetweenDates(classUuid, userUuid, fromDate, toDate)
+                             else attendanceDao.getAttendanceForClassBetweenDates(classUuid, fromDate, toDate)
+
+        // Friday Auto-Detect and Skip:
+        // Weekly holiday (Friday) is automatically skipped so it does NOT affect required days or average attendance.
+        // 6 days a week, ~24 days a month = 100% attendance.
+        val attendanceList = rawAttendanceList.filter { !isFridayDate(it.date) }
+        val skippedFridaysCount = rawAttendanceList.filter { isFridayDate(it.date) }.map { it.date }.distinct().size
 
         val groupedByStudent = attendanceList.groupBy { it.studentUuid }
         val items = mutableListOf<StudentReportItem>()
@@ -502,24 +589,31 @@ class AttendanceRepository(private val context: Context) {
             toDate = toDate,
             totalStudents = students.size,
             overallPercentage = overallPercentage,
-            items = items
+            items = items,
+            skippedFridaysCount = skippedFridaysCount
         )
     }
 
     suspend fun getStudentReport(
         studentUuid: String,
         fromDate: String,
-        toDate: String
+        toDate: String,
+        userUuid: String? = null
     ): SingleStudentReportData? = withContext(Dispatchers.IO) {
         val student = studentDao.getStudentByUuid(studentUuid) ?: return@withContext null
         val cls = classDao.getClassByUuid(student.classUuid)
-        val records = attendanceDao.getAttendanceForStudentBetweenDates(studentUuid, fromDate, toDate)
+        val rawRecords = if (userUuid != null) attendanceDao.getAttendanceForStudentBetweenDates(studentUuid, userUuid, fromDate, toDate)
+                      else attendanceDao.getAttendanceForStudentBetweenDates(studentUuid, fromDate, toDate)
 
-        val totalDays = records.size
-        val present = records.count { it.status == "PRESENT" }
-        val absent = records.count { it.status == "ABSENT" }
-        val late = records.count { it.status == "LATE" }
-        val excused = records.count { it.status == "EXCUSED" }
+        // Friday Auto-Detect and Skip:
+        val validRecords = rawRecords.filter { !isFridayDate(it.date) }
+        val skippedFridaysCount = rawRecords.count { isFridayDate(it.date) }
+
+        val totalDays = validRecords.size
+        val present = validRecords.count { it.status == "PRESENT" }
+        val absent = validRecords.count { it.status == "ABSENT" }
+        val late = validRecords.count { it.status == "LATE" }
+        val excused = validRecords.count { it.status == "EXCUSED" }
 
         val percentage = if (totalDays > 0) {
             ((present.toFloat() + (late.toFloat() * 0.5f)) / totalDays.toFloat()) * 100f
@@ -536,7 +630,8 @@ class AttendanceRepository(private val context: Context) {
             late = late,
             excused = excused,
             percentage = percentage,
-            records = records
+            records = validRecords,
+            skippedFridaysCount = skippedFridaysCount
         )
     }
 
@@ -751,30 +846,35 @@ class AttendanceRepository(private val context: Context) {
                     if (entities.isNotEmpty()) feePaymentDao.insertOrUpdateAll(entities)
                 }
 
-                // Reconcile: If active items exist in local app but are missing on server (e.g. deleted directly from DB),
-                // mark them unsynced so they immediately push to server database
-                var needsFollowUpPush = false
+                // Real-Time Server-to-App Deletion Propagation:
+                // If a record previously existed on both app and server (isSynced == true) but is no longer in the server active list,
+                // it was deleted from the server database. Remove it from local Room immediately so the app stays perfectly in sync!
                 val serverClassUuids = syncData?.classes?.map { it.uuid }?.toSet() ?: emptySet()
                 val localClasses = classDao.getClassesList(userUuid)
-                val missingClasses = localClasses.filter { !serverClassUuids.contains(it.uuid) && !it.isDeleted }
-                if (missingClasses.isNotEmpty()) {
-                    classDao.markAsUnsynced(missingClasses.map { it.uuid })
-                    needsFollowUpPush = true
+                val classesDeletedOnServer = localClasses.filter { it.isSynced && !serverClassUuids.contains(it.uuid) }
+                if (classesDeletedOnServer.isNotEmpty()) {
+                    classDao.hardDelete(classesDeletedOnServer.map { it.uuid })
                 }
 
                 val serverStudentUuids = syncData?.students?.map { it.uuid }?.toSet() ?: emptySet()
                 val localStudents = studentDao.getAllStudentsForUserList(userUuid)
-                val missingStudents = localStudents.filter { !serverStudentUuids.contains(it.uuid) && !it.isDeleted }
-                if (missingStudents.isNotEmpty()) {
-                    studentDao.markAsUnsynced(missingStudents.map { it.uuid })
-                    needsFollowUpPush = true
+                val studentsDeletedOnServer = localStudents.filter { it.isSynced && !serverStudentUuids.contains(it.uuid) }
+                if (studentsDeletedOnServer.isNotEmpty()) {
+                    studentDao.hardDelete(studentsDeletedOnServer.map { it.uuid })
                 }
 
-                if (needsFollowUpPush) {
-                    repositoryScope.launch {
-                        delay(1000)
-                        performSync(userUuid)
-                    }
+                val serverAttUuids = syncData?.attendance?.map { it.uuid }?.toSet() ?: emptySet()
+                val localAttendance = attendanceDao.getAllAttendanceForUserList(userUuid)
+                val attDeletedOnServer = localAttendance.filter { it.isSynced && !serverAttUuids.contains(it.uuid) }
+                if (attDeletedOnServer.isNotEmpty()) {
+                    attendanceDao.hardDelete(attDeletedOnServer.map { it.uuid })
+                }
+
+                val serverPaymentUuids = syncData?.payments?.map { it.uuid }?.toSet() ?: emptySet()
+                val localPayments = feePaymentDao.getAllPaymentsForUserList(userUuid)
+                val paymentsDeletedOnServer = localPayments.filter { it.isSynced && !serverPaymentUuids.contains(it.uuid) }
+                if (paymentsDeletedOnServer.isNotEmpty()) {
+                    feePaymentDao.hardDelete(paymentsDeletedOnServer.map { it.uuid })
                 }
 
                 val newTimestamp = syncData?.serverTimestamp ?: System.currentTimeMillis()
