@@ -315,7 +315,7 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         gender: String,
         phone: String,
         email: String,
-        monthlyFee: Double = 500.0,
+        monthlyFee: Double = 0.0,
         admissionDate: String = "",
         onResult: (Boolean, String) -> Unit
     ) {

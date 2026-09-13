@@ -231,7 +231,7 @@ fun MainApp(
                         icon = {
                             Icon(Icons.Default.Payments, contentDescription = "Fee Collection")
                         },
-                        label = { Text("কালেক্ট বেতন", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                        label = { Text("ফিস", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
                         modifier = Modifier.testTag("nav_fee_collection")
                     )
 

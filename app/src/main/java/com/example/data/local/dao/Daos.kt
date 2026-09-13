@@ -61,6 +61,15 @@ interface ClassDao {
 
     @Query("SELECT COUNT(*) FROM classes WHERE userUuid = :userUuid AND isDeleted = 0")
     fun getClassCount(userUuid: String): Flow<Int>
+
+    @Query("DELETE FROM classes WHERE uuid IN (:uuids)")
+    suspend fun hardDelete(uuids: List<String>)
+
+    @Query("DELETE FROM classes WHERE isDeleted = 1")
+    suspend fun purgeDeleted()
+
+    @Query("UPDATE classes SET isSynced = 0 WHERE uuid IN (:uuids)")
+    suspend fun markAsUnsynced(uuids: List<String>)
 }
 
 @Dao
@@ -70,6 +79,9 @@ interface StudentDao {
 
     @Query("SELECT * FROM students WHERE userUuid = :userUuid AND isDeleted = 0 ORDER BY name ASC")
     fun getAllStudentsForUser(userUuid: String): Flow<List<StudentEntity>>
+
+    @Query("SELECT * FROM students WHERE userUuid = :userUuid AND isDeleted = 0 ORDER BY name ASC")
+    suspend fun getAllStudentsForUserList(userUuid: String): List<StudentEntity>
 
     @Query("SELECT * FROM students WHERE classUuid = :classUuid AND isDeleted = 0")
     suspend fun getStudentsByClassList(classUuid: String): List<StudentEntity>
@@ -103,6 +115,15 @@ interface StudentDao {
 
     @Query("SELECT COUNT(*) FROM students WHERE classUuid = :classUuid AND isDeleted = 0")
     fun getStudentCountForClass(classUuid: String): Flow<Int>
+
+    @Query("DELETE FROM students WHERE uuid IN (:uuids)")
+    suspend fun hardDelete(uuids: List<String>)
+
+    @Query("DELETE FROM students WHERE isDeleted = 1")
+    suspend fun purgeDeleted()
+
+    @Query("UPDATE students SET isSynced = 0 WHERE uuid IN (:uuids)")
+    suspend fun markAsUnsynced(uuids: List<String>)
 }
 
 @Dao
@@ -139,6 +160,15 @@ interface AttendanceDao {
 
     @Query("SELECT COUNT(*) FROM attendance WHERE isSynced = 0 AND userUuid = :userUuid")
     fun getUnsyncedCount(userUuid: String): Flow<Int>
+
+    @Query("DELETE FROM attendance WHERE uuid IN (:uuids)")
+    suspend fun hardDelete(uuids: List<String>)
+
+    @Query("DELETE FROM attendance WHERE isDeleted = 1")
+    suspend fun purgeDeleted()
+
+    @Query("UPDATE attendance SET isSynced = 0 WHERE uuid IN (:uuids)")
+    suspend fun markAsUnsynced(uuids: List<String>)
 }
 
 @Dao
@@ -178,4 +208,13 @@ interface FeePaymentDao {
 
     @Query("SELECT COUNT(*) FROM fee_payments WHERE isSynced = 0 AND userUuid = :userUuid")
     fun getUnsyncedCount(userUuid: String): Flow<Int>
+
+    @Query("DELETE FROM fee_payments WHERE uuid IN (:uuids)")
+    suspend fun hardDelete(uuids: List<String>)
+
+    @Query("DELETE FROM fee_payments WHERE isDeleted = 1")
+    suspend fun purgeDeleted()
+
+    @Query("UPDATE fee_payments SET isSynced = 0 WHERE uuid IN (:uuids)")
+    suspend fun markAsUnsynced(uuids: List<String>)
 }

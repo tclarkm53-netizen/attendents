@@ -47,8 +47,8 @@ data class SyncClassDto(
     val section: String? = "",
     val subject: String? = "",
     @Json(name = "is_deleted") val isDeleted: Int = 0,
-    @Json(name = "created_at") val createdAt: Long,
-    @Json(name = "updated_at") val updatedAt: Long
+    @Json(name = "created_at") val createdAt: Long = 0L,
+    @Json(name = "updated_at") val updatedAt: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -60,11 +60,11 @@ data class SyncStudentDto(
     val gender: String? = "Not Specified",
     val phone: String? = "",
     val email: String? = "",
-    @Json(name = "monthly_fee") val monthlyFee: Double? = 500.0,
+    @Json(name = "monthly_fee") val monthlyFee: Double? = 0.0,
     @Json(name = "admission_date") val admissionDate: String? = "",
     @Json(name = "is_deleted") val isDeleted: Int = 0,
-    @Json(name = "created_at") val createdAt: Long,
-    @Json(name = "updated_at") val updatedAt: Long
+    @Json(name = "created_at") val createdAt: Long = 0L,
+    @Json(name = "updated_at") val updatedAt: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -76,8 +76,8 @@ data class SyncAttendanceDto(
     val status: String,
     val remarks: String? = "",
     @Json(name = "is_deleted") val isDeleted: Int = 0,
-    @Json(name = "created_at") val createdAt: Long,
-    @Json(name = "updated_at") val updatedAt: Long
+    @Json(name = "created_at") val createdAt: Long = 0L,
+    @Json(name = "updated_at") val updatedAt: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -86,13 +86,13 @@ data class SyncPaymentDto(
     @Json(name = "user_uuid") val userUuid: String? = null,
     @Json(name = "student_uuid") val studentUuid: String,
     @Json(name = "class_uuid") val classUuid: String,
-    @Json(name = "amount_paid") val amountPaid: Double,
+    @Json(name = "amount_paid") val amountPaid: Double = 0.0,
     @Json(name = "payment_date") val paymentDate: String,
     @Json(name = "receipt_no") val receiptNo: String? = "",
     @Json(name = "month_covered") val monthCovered: String? = "",
     val note: String? = "",
     @Json(name = "is_deleted") val isDeleted: Int = 0,
-    @Json(name = "created_at") val createdAt: Long,
+    @Json(name = "created_at") val createdAt: Long = 0L,
     @Json(name = "updated_at") val updatedAt: Long = 0L
 )
 

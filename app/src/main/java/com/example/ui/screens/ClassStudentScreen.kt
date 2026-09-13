@@ -545,7 +545,7 @@ fun ClassStudentScreen(viewModel: AttendanceViewModel) {
             var gender by remember { mutableStateOf("Male") }
             var phone by remember { mutableStateOf("") }
             var email by remember { mutableStateOf("") }
-            var monthlyFeeStr by remember { mutableStateOf("500") }
+            var monthlyFeeStr by remember { mutableStateOf("") }
             val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
             var admissionDate by remember { mutableStateOf(todayStr) }
 
@@ -709,7 +709,7 @@ fun ClassStudentScreen(viewModel: AttendanceViewModel) {
                                 return@Button
                             }
                             val chosenClass = selectedClassInDialog!!
-                            val parsedFee = monthlyFeeStr.toDoubleOrNull() ?: 500.0
+                            val parsedFee = monthlyFeeStr.toDoubleOrNull() ?: 0.0
                             viewModel.addStudent(
                                 classUuid = chosenClass.uuid,
                                 roll = roll,
@@ -768,19 +768,32 @@ fun ClassStudentScreen(viewModel: AttendanceViewModel) {
             var editRoll by remember(student) { mutableStateOf(student.rollNumber) }
             var editName by remember(student) { mutableStateOf(student.name) }
             var editPhone by remember(student) { mutableStateOf(student.phone) }
-            var editMonthlyFeeStr by remember(student) { mutableStateOf(student.monthlyFee.toInt().toString()) }
-            var editAdmissionDate by remember(student) { mutableStateOf(student.admissionDate) }
+            var editMonthlyFeeStr by remember(student) {
+                mutableStateOf(
+                    if (student.monthlyFee % 1.0 == 0.0) student.monthlyFee.toInt().toString()
+                    else student.monthlyFee.toString()
+                )
+            }
+            val defaultAdm = if (student.admissionDate.isNotBlank()) student.admissionDate else {
+                SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(if (student.createdAt > 0L) student.createdAt else System.currentTimeMillis()))
+            }
+            var editAdmissionDate by remember(student) { mutableStateOf(defaultAdm) }
 
             val editCal = Calendar.getInstance()
+            val admParts = editAdmissionDate.split("-")
+            val defYear = admParts.getOrNull(0)?.toIntOrNull() ?: editCal.get(Calendar.YEAR)
+            val defMonth = (admParts.getOrNull(1)?.toIntOrNull()?.minus(1)) ?: editCal.get(Calendar.MONTH)
+            val defDay = admParts.getOrNull(2)?.toIntOrNull() ?: editCal.get(Calendar.DAY_OF_MONTH)
+
             val editDatePicker = remember(student) {
                 DatePickerDialog(
                     context,
                     { _, y, m, d ->
                         editAdmissionDate = String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d)
                     },
-                    editCal.get(Calendar.YEAR),
-                    editCal.get(Calendar.MONTH),
-                    editCal.get(Calendar.DAY_OF_MONTH)
+                    defYear,
+                    defMonth,
+                    defDay
                 )
             }
 
@@ -844,14 +857,15 @@ fun ClassStudentScreen(viewModel: AttendanceViewModel) {
                                 Toast.makeText(context, "রোল এবং নাম আবশ্যক", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            val parsedFee = editMonthlyFeeStr.toDoubleOrNull() ?: student.monthlyFee
+                            val parsedFee = editMonthlyFeeStr.toDoubleOrNull() ?: 0.0
+                            val finalAdmDate = if (editAdmissionDate.isNotBlank()) editAdmissionDate else defaultAdm
                             viewModel.updateStudent(
                                 studentUuid = student.uuid,
                                 roll = editRoll,
                                 name = editName,
                                 phone = editPhone,
                                 monthlyFee = parsedFee,
-                                admissionDate = editAdmissionDate
+                                admissionDate = finalAdmDate
                             ) { success, msg ->
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 if (success) {

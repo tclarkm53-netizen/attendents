@@ -186,7 +186,7 @@ fun SyncSettingsScreen(viewModel: AttendanceViewModel) {
                         } else {
                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("এখনই সিংক")
+                            Text("সিংক")
                         }
                     }
                 }

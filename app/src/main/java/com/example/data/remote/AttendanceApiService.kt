@@ -23,6 +23,58 @@ interface AttendanceApiService {
     suspend fun sync(@Body request: SyncRequest): Response<ApiResponse<SyncResponseData>>
 }
 
+class FlexibleDoubleAdapter {
+    @com.squareup.moshi.FromJson
+    fun fromJson(reader: com.squareup.moshi.JsonReader): Double {
+        return when (reader.peek()) {
+            com.squareup.moshi.JsonReader.Token.STRING -> {
+                val str = reader.nextString().trim()
+                str.toDoubleOrNull() ?: 0.0
+            }
+            com.squareup.moshi.JsonReader.Token.NUMBER -> reader.nextDouble()
+            com.squareup.moshi.JsonReader.Token.NULL -> {
+                reader.nextNull<Unit>()
+                0.0
+            }
+            else -> {
+                reader.skipValue()
+                0.0
+            }
+        }
+    }
+
+    @com.squareup.moshi.ToJson
+    fun toJson(writer: com.squareup.moshi.JsonWriter, value: Double?) {
+        writer.value(value ?: 0.0)
+    }
+}
+
+class FlexibleLongAdapter {
+    @com.squareup.moshi.FromJson
+    fun fromJson(reader: com.squareup.moshi.JsonReader): Long {
+        return when (reader.peek()) {
+            com.squareup.moshi.JsonReader.Token.STRING -> {
+                val str = reader.nextString().trim()
+                str.toLongOrNull() ?: (str.toDoubleOrNull()?.toLong() ?: 0L)
+            }
+            com.squareup.moshi.JsonReader.Token.NUMBER -> reader.nextLong()
+            com.squareup.moshi.JsonReader.Token.NULL -> {
+                reader.nextNull<Unit>()
+                0L
+            }
+            else -> {
+                reader.skipValue()
+                0L
+            }
+        }
+    }
+
+    @com.squareup.moshi.ToJson
+    fun toJson(writer: com.squareup.moshi.JsonWriter, value: Long?) {
+        writer.value(value ?: 0L)
+    }
+}
+
 class ApiClient private constructor(context: Context) {
     private val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
 
@@ -43,6 +95,8 @@ class ApiClient private constructor(context: Context) {
     }
 
     private val moshi = Moshi.Builder()
+        .add(FlexibleDoubleAdapter())
+        .add(FlexibleLongAdapter())
         .add(KotlinJsonAdapterFactory())
         .build()
 

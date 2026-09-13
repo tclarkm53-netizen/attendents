@@ -21,6 +21,7 @@ import com.example.data.remote.SyncStudentDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -245,7 +246,7 @@ class AttendanceRepository(private val context: Context) {
         gender: String,
         phone: String,
         email: String,
-        monthlyFee: Double = 500.0,
+        monthlyFee: Double = 0.0,
         admissionDate: String = ""
     ) = withContext(Dispatchers.IO) {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -283,13 +284,18 @@ class AttendanceRepository(private val context: Context) {
         monthlyFee: Double,
         admissionDate: String
     ) = withContext(Dispatchers.IO) {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val finalAdmDate = admissionDate.trim().ifBlank {
+            val existing = studentDao.getStudentByUuid(studentUuid)
+            existing?.admissionDate?.ifBlank { today } ?: today
+        }
         studentDao.updateStudentDetails(
             uuid = studentUuid,
             roll = roll.trim(),
             name = name.trim(),
             phone = phone.trim(),
             monthlyFee = monthlyFee,
-            admissionDate = admissionDate.trim()
+            admissionDate = finalAdmDate
         )
         triggerSync(userUuid)
     }
@@ -630,21 +636,42 @@ class AttendanceRepository(private val context: Context) {
             if (response.isSuccessful && response.body()?.success == true) {
                 val syncData = response.body()?.data
 
-                // Mark local uploaded items as synced
-                if (unsyncedClasses.isNotEmpty()) {
-                    classDao.markAsSynced(unsyncedClasses.map { it.uuid })
-                }
-                if (unsyncedStudents.isNotEmpty()) {
-                    studentDao.markAsSynced(unsyncedStudents.map { it.uuid })
-                }
-                if (unsyncedAttendance.isNotEmpty()) {
-                    attendanceDao.markAsSynced(unsyncedAttendance.map { it.uuid })
-                }
-                if (unsyncedPayments.isNotEmpty()) {
-                    feePaymentDao.markAsSynced(unsyncedPayments.map { it.uuid })
-                }
+                // For items that were soft-deleted locally and uploaded to server (server permanently deleted them):
+                // Hard delete them from Room so they are completely removed locally as well
+                val deletedClasses = unsyncedClasses.filter { it.isDeleted }.map { it.uuid }
+                if (deletedClasses.isNotEmpty()) classDao.hardDelete(deletedClasses)
 
-                // Merge server updates into Room
+                val deletedStudents = unsyncedStudents.filter { it.isDeleted }.map { it.uuid }
+                if (deletedStudents.isNotEmpty()) studentDao.hardDelete(deletedStudents)
+
+                val deletedAtt = unsyncedAttendance.filter { it.isDeleted }.map { it.uuid }
+                if (deletedAtt.isNotEmpty()) attendanceDao.hardDelete(deletedAtt)
+
+                val deletedPayments = unsyncedPayments.filter { it.isDeleted }.map { it.uuid }
+                if (deletedPayments.isNotEmpty()) feePaymentDao.hardDelete(deletedPayments)
+
+                // Purge any remaining soft-deleted records from Room
+                classDao.purgeDeleted()
+                studentDao.purgeDeleted()
+                attendanceDao.purgeDeleted()
+                feePaymentDao.purgeDeleted()
+
+                // Mark remaining active uploaded items as synced
+                val syncedClasses = unsyncedClasses.filter { !it.isDeleted }.map { it.uuid }
+                if (syncedClasses.isNotEmpty()) classDao.markAsSynced(syncedClasses)
+
+                val syncedStudents = unsyncedStudents.filter { !it.isDeleted }.map { it.uuid }
+                if (syncedStudents.isNotEmpty()) studentDao.markAsSynced(syncedStudents)
+
+                val syncedAttendance = unsyncedAttendance.filter { !it.isDeleted }.map { it.uuid }
+                if (syncedAttendance.isNotEmpty()) attendanceDao.markAsSynced(syncedAttendance)
+
+                val syncedPayments = unsyncedPayments.filter { !it.isDeleted }.map { it.uuid }
+                if (syncedPayments.isNotEmpty()) feePaymentDao.markAsSynced(syncedPayments)
+
+                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+                // Merge server updates into Room (pulling newly added or updated data from MySQL Database)
                 syncData?.classes?.let { serverClasses ->
                     val entities = serverClasses.map {
                         ClassEntity(
@@ -654,8 +681,8 @@ class AttendanceRepository(private val context: Context) {
                             section = it.section ?: "",
                             subject = it.subject ?: "",
                             isDeleted = it.isDeleted == 1,
-                            createdAt = it.createdAt,
-                            updatedAt = it.updatedAt,
+                            createdAt = if (it.createdAt > 0L) it.createdAt else System.currentTimeMillis(),
+                            updatedAt = if (it.updatedAt > 0L) it.updatedAt else System.currentTimeMillis(),
                             isSynced = true
                         )
                     }
@@ -673,11 +700,11 @@ class AttendanceRepository(private val context: Context) {
                             gender = it.gender ?: "Not Specified",
                             phone = it.phone ?: "",
                             email = it.email ?: "",
-                            monthlyFee = it.monthlyFee ?: 500.0,
-                            admissionDate = it.admissionDate ?: "",
+                            monthlyFee = it.monthlyFee ?: 0.0,
+                            admissionDate = if (!it.admissionDate.isNullOrBlank()) it.admissionDate else todayStr,
                             isDeleted = it.isDeleted == 1,
-                            createdAt = it.createdAt,
-                            updatedAt = it.updatedAt,
+                            createdAt = if (it.createdAt > 0L) it.createdAt else System.currentTimeMillis(),
+                            updatedAt = if (it.updatedAt > 0L) it.updatedAt else System.currentTimeMillis(),
                             isSynced = true
                         )
                     }
@@ -695,8 +722,8 @@ class AttendanceRepository(private val context: Context) {
                             status = it.status,
                             remarks = it.remarks ?: "",
                             isDeleted = it.isDeleted == 1,
-                            createdAt = it.createdAt,
-                            updatedAt = it.updatedAt,
+                            createdAt = if (it.createdAt > 0L) it.createdAt else System.currentTimeMillis(),
+                            updatedAt = if (it.updatedAt > 0L) it.updatedAt else System.currentTimeMillis(),
                             isSynced = true
                         )
                     }
@@ -716,12 +743,38 @@ class AttendanceRepository(private val context: Context) {
                             monthCovered = it.monthCovered ?: "",
                             note = it.note ?: "",
                             isDeleted = it.isDeleted == 1,
-                            createdAt = it.createdAt,
-                            updatedAt = it.updatedAt,
+                            createdAt = if (it.createdAt > 0L) it.createdAt else System.currentTimeMillis(),
+                            updatedAt = if (it.updatedAt > 0L) it.updatedAt else System.currentTimeMillis(),
                             isSynced = true
                         )
                     }
                     if (entities.isNotEmpty()) feePaymentDao.insertOrUpdateAll(entities)
+                }
+
+                // Reconcile: If active items exist in local app but are missing on server (e.g. deleted directly from DB),
+                // mark them unsynced so they immediately push to server database
+                var needsFollowUpPush = false
+                val serverClassUuids = syncData?.classes?.map { it.uuid }?.toSet() ?: emptySet()
+                val localClasses = classDao.getClassesList(userUuid)
+                val missingClasses = localClasses.filter { !serverClassUuids.contains(it.uuid) && !it.isDeleted }
+                if (missingClasses.isNotEmpty()) {
+                    classDao.markAsUnsynced(missingClasses.map { it.uuid })
+                    needsFollowUpPush = true
+                }
+
+                val serverStudentUuids = syncData?.students?.map { it.uuid }?.toSet() ?: emptySet()
+                val localStudents = studentDao.getAllStudentsForUserList(userUuid)
+                val missingStudents = localStudents.filter { !serverStudentUuids.contains(it.uuid) && !it.isDeleted }
+                if (missingStudents.isNotEmpty()) {
+                    studentDao.markAsUnsynced(missingStudents.map { it.uuid })
+                    needsFollowUpPush = true
+                }
+
+                if (needsFollowUpPush) {
+                    repositoryScope.launch {
+                        delay(1000)
+                        performSync(userUuid)
+                    }
                 }
 
                 val newTimestamp = syncData?.serverTimestamp ?: System.currentTimeMillis()
