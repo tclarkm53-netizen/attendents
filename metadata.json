@@ -1,7 +1,0 @@
-{
-  "name": "Student Attendance",
-  "description": "Student Attendance System with Offline-First Sync, Class & Student Management, PDF Reports, and PHP/MySQL Backend.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
-
