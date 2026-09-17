@@ -148,28 +148,22 @@ fun AttendanceScreen(
     var absentCount = 0
     var lateCount = 0
     var excusedCount = 0
-    var unmarkedCount = 0
 
     visibleStudents.forEach { s ->
         val record = attendanceMap[s.uuid]
-        val effectiveStatus = record?.first ?: ""
+        val effectiveStatus = if (record != null) {
+            record.first
+        } else if (isToday) {
+            "PRESENT"
+        } else {
+            "UNRECORDED"
+        }
         when (effectiveStatus) {
             "PRESENT" -> presentCount++
             "ABSENT" -> absentCount++
             "LATE" -> lateCount++
             "EXCUSED" -> excusedCount++
-            else -> unmarkedCount++
         }
-    }
-    val hasEntry = (totalStudents > 0 && unmarkedCount < totalStudents)
-
-    val isFriday = try {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val parsed = sdf.parse(selectedDate)
-        val cal = Calendar.getInstance().apply { time = parsed ?: Date() }
-        cal.get(Calendar.DAY_OF_WEEK) == Calendar.FRIDAY
-    } catch (e: Exception) {
-        false
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -276,14 +270,13 @@ fun AttendanceScreen(
                         }
                     }
 
-                    // Date Mode & Entry Status Indicator Banner
+                    // Date Mode Indicator Banner
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 8.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (hasEntry) PresentContainer
-                            else MaterialTheme.colorScheme.surfaceVariant
+                            containerColor = if (isToday) PresentContainer else MaterialTheme.colorScheme.surfaceVariant
                         ),
                         shape = RoundedCornerShape(8.dp)
                     ) {
@@ -299,29 +292,21 @@ fun AttendanceScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
-                                    imageVector = if (hasEntry) Icons.Default.CheckCircle else Icons.Default.CalendarMonth,
+                                    imageVector = if (isToday) Icons.Default.CheckCircle else Icons.Default.Lock,
                                     contentDescription = null,
-                                    tint = if (hasEntry) PresentGreen else MaterialTheme.colorScheme.primary,
+                                    tint = if (isToday) PresentGreen else MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = if (hasEntry) "✅ এই তারিখের (${selectedDate}) হাজিরা সংরক্ষিত (${totalStudents - unmarkedCount}/${totalStudents})"
-                                        else "⚪ এই তারিখে এখনও কোনো হাজিরা নেওয়া হয়নি (নন-এন্ট্রি ডেট)",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        color = if (hasEntry) PresentOnContainer else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (!hasEntry) {
-                                        Text(
-                                            text = "হাজিরা দিতে শিক্ষার্থীদের স্ট্যাটাস দিন বা 'সবাই উপস্থিত' চাপুন",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = if (isToday) "🟢 আজকের হাজিরা গ্রহণ ও পরিবর্তন চালু আছে"
+                                    else if (isPast) "🔒 পুরাতন হাজিরা (কেবল দেখার জন্য, পরিবর্তন বন্ধ)"
+                                    else "🔒 ভবিষ্যতের তারিখ (হাজিরা পরিবর্তন বন্ধ)",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium
+                                    ),
+                                    color = if (isToday) PresentOnContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                             if (!isToday) {
                                 TextButton(
@@ -331,46 +316,6 @@ fun AttendanceScreen(
                                     Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("আজকের তারিখ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-
-                    // Friday Auto-Skip Notification Banner
-                    if (isFriday) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.EventBusy,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "🕌 শুক্রবার - সাপ্তাহিক ছুটি (অটো-স্কিপ সক্রিয়)",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                                    )
-                                    Text(
-                                        text = "শুক্রবার রিপোর্টে কাউন্ট হবে না ও গড় উপস্থিতিতে প্রভাব ফেলবে না (সপ্তাহে ৬ দিন ও মাসে ২৪ দিন = ১০০% উপস্থিতি)।",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
-                                    )
                                 }
                             }
                         }
@@ -386,45 +331,47 @@ fun AttendanceScreen(
                         StatBadge(label = "ভর্তিকৃত", count = totalStudents, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                         StatBadge(label = "উপস্থিত", count = presentCount, color = PresentGreen, modifier = Modifier.weight(1f))
                         StatBadge(label = "অনুপস্থিত", count = absentCount, color = AbsentRed, modifier = Modifier.weight(1f))
-                        StatBadge(label = "অনির্ধারিত", count = unmarkedCount, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        StatBadge(label = "দেরি", count = lateCount, color = LateAmber, modifier = Modifier.weight(1f))
+                        if (excusedCount > 0) {
+                            StatBadge(label = "ছুটি", count = excusedCount, color = ExcusedBlue, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    if (excusedCount > 0) {
+                        Text(
+                            text = "ℹ️ ছুটিপ্রাপ্ত ($excusedCount জন) শিক্ষার্থীর উপস্থিতি/অনুপস্থিতি হিসেবে কাউন্ট হবে না",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ExcusedBlue,
+                            modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                        )
                     }
 
-                    // Quick Actions (Mark All)
-                    if (visibleStudents.isNotEmpty()) {
+                    // Quick Actions (Mark All) - Only enabled & visible for TODAY
+                    if (isToday) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
                                 onClick = { viewModel.markAll("PRESENT") },
-                                modifier = Modifier.weight(1.2f),
+                                modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = PresentGreen)
                             ) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("সবাই উপস্থিত", fontSize = 11.sp)
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("সবাই উপস্থিত", fontSize = 12.sp)
                             }
 
                             OutlinedButton(
                                 onClick = { viewModel.markAll("ABSENT") },
-                                modifier = Modifier.weight(1.2f),
+                                modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = AbsentRed)
                             ) {
-                                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("সবাই অনুপস্থিত", fontSize = 11.sp)
-                            }
-
-                            OutlinedButton(
-                                onClick = { viewModel.unmarkAll() },
-                                modifier = Modifier.weight(0.9f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                            ) {
-                                Text("ক্লিয়ার", fontSize = 11.sp)
+                                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("সবাই অনুপস্থিত", fontSize = 12.sp)
                             }
                         }
                     }
@@ -482,24 +429,42 @@ fun AttendanceScreen(
                 ) {
                     items(visibleStudents, key = { it.uuid }) { student ->
                         val record = attendanceMap[student.uuid]
-                        val currentStatus = record?.first ?: ""
+                        val currentStatus = if (record != null) {
+                            record.first
+                        } else if (isToday) {
+                            "PRESENT"
+                        } else {
+                            "UNRECORDED"
+                        }
                         val currentRemarks = record?.second ?: ""
 
                         StudentAttendanceCard(
                             student = student,
                             status = currentStatus,
                             remarks = currentRemarks,
-                            isEditable = true,
+                            isEditable = isToday,
                             onStatusSelected = { newStatus ->
-                                if (currentStatus == newStatus) {
-                                    viewModel.markStudent(student.uuid, "") // unmark if tapped again
-                                } else {
+                                if (isToday) {
                                     viewModel.markStudent(student.uuid, newStatus)
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "শুধুমাত্র আজকের ($todayDateStr) হাজিরা পরিবর্তন করা যাবে",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             },
                             onEditRemarks = {
-                                editingRemarksStudent = student
-                                currentRemarksText = currentRemarks
+                                if (isToday) {
+                                    editingRemarksStudent = student
+                                    currentRemarksText = currentRemarks
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "শুধুমাত্র আজকের ($todayDateStr) হাজিরা মন্তব্য পরিবর্তন করা যাবে",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             }
                         )
                     }
@@ -507,8 +472,8 @@ fun AttendanceScreen(
             }
         }
 
-        // Save Attendance Floating Action Button - Available for any selected date
-        if (visibleStudents.isNotEmpty()) {
+        // Save Attendance Floating Action Button - Only available on TODAY
+        if (isToday && visibleStudents.isNotEmpty()) {
             FloatingActionButton(
                 onClick = {
                     viewModel.saveAttendance { success, msg ->
@@ -656,14 +621,7 @@ fun StudentAttendanceCard(
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        if (status.isBlank()) {
-                            Text(
-                                text = "⚪ হাজিরা দেওয়া হয়নি (নিচে নির্বাচন করুন)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                fontSize = 11.sp
-                            )
-                        } else if (remarks.isNotBlank()) {
+                        if (remarks.isNotBlank()) {
                             Text(
                                 text = "নোট: $remarks",
                                 style = MaterialTheme.typography.bodySmall,
@@ -768,7 +726,7 @@ fun StudentAttendanceCard(
                     "PRESENT" -> "উপস্থিত (Present)"
                     "ABSENT" -> "অনুপস্থিত (Absent)"
                     "LATE" -> "দেরিতে উপস্থিতি (Late)"
-                    "EXCUSED" -> "ছুটি অনুমোদিত (Excused)"
+                    "EXCUSED" -> "ছুটি অনুমোদিত (গণনার বাইরে)"
                     else -> "হাজিরা নেওয়া হয়নি (Not Recorded)"
                 }
                 val statusIcon = when (status) {

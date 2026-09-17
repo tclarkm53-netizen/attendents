@@ -48,7 +48,7 @@ data class StudentEntity(
     val gender: String = "Not Specified",
     val phone: String = "",
     val email: String = "",
-    val monthlyFee: Double = 0.0,
+    val monthlyFee: Double = 500.0,
     val admissionDate: String = "",
     val isDeleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
@@ -75,9 +75,7 @@ data class FeePaymentEntity(
     val receiptNo: String = "",
     val monthCovered: String = "",
     val note: String = "",
-    val isDeleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false
 )
 

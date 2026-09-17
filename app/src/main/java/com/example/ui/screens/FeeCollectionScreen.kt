@@ -26,23 +26,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,7 +49,6 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -83,7 +76,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.local.entity.ClassEntity
 import com.example.data.local.entity.FeePaymentEntity
 import com.example.data.local.entity.StudentEntity
 import com.example.data.repository.StudentFeeSummary
@@ -91,7 +83,6 @@ import com.example.ui.theme.AbsentRed
 import com.example.ui.theme.LateAmber
 import com.example.ui.theme.PresentGreen
 import com.example.ui.viewmodel.AttendanceViewModel
-import com.example.utils.PdfReportGenerator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -463,29 +454,58 @@ fun FeeStudentCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text("ভর্তির তারিখ ও সময়", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(modifier = Modifier.weight(1.2f)) {
                     Text(
-                        text = "${summary.admissionDate} (${summary.elapsedDays} দিন)",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
-                    )
-                    Text(
-                        text = "অতিবাহিত: ${summary.elapsedMonths} মাস",
+                        text = "ভর্তির তারিখ: ${summary.admissionDate} (${summary.totalDaysEnrolled} দিন)",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "বিলকৃত: ${summary.billedMonths} মাস",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                        ) {
+                            Text(
+                                text = "রানিং: ${summary.runningDays} দিন",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "কারেন্ট মাসে অতিবাহিত: ${summary.runningDays} দিন",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
+                Column(
+                    modifier = Modifier.weight(0.9f),
+                    horizontalAlignment = Alignment.End
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("মাসিক বেতন: ৳${summary.monthlyFee.toInt()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("মাসিক: ৳${summary.monthlyFee.toInt()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         IconButton(onClick = onEditFee, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Default.Edit, contentDescription = "Edit Fee", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                     Text(
                         text = "মোট প্রদেয়: ৳${summary.totalPayable.toInt()}",
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    Text(
+                        text = "(${summary.billedMonths} মাস × ৳${summary.monthlyFee.toInt()})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        fontSize = 10.sp
                     )
                 }
             }
@@ -600,6 +620,11 @@ fun PaymentDialog(
                         Text(
                             text = "${student.name} (রোল: ${student.rollNumber})",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "ভর্তি: ${summary.admissionDate} (মোট ${summary.totalDaysEnrolled} দিন) | বিল: ${summary.billedMonths} মাস | রানিং: ${summary.runningDays} দিন",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Text(
                             text = "মাসিক বেতন: ৳${summary.monthlyFee.toInt()} | বকেয়া: ৳${summary.dueAmount.toInt()} (${summary.dueMonths} মাস)",
@@ -764,10 +789,8 @@ fun PaymentHistoryDialog(
     viewModel: AttendanceViewModel,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
     val paymentsFlow = remember(student.uuid) { viewModel.getPaymentsForStudent(student.uuid) }
     val payments by paymentsFlow.collectAsState(initial = emptyList())
-    var paymentToDelete by remember { mutableStateOf<FeePaymentEntity?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -817,25 +840,11 @@ fun PaymentHistoryDialog(
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             color = PresentGreen
                                         )
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = payment.paymentDate,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            IconButton(
-                                                onClick = { paymentToDelete = payment },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Delete,
-                                                    contentDescription = "Delete Payment",
-                                                    tint = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
+                                        Text(
+                                            text = payment.paymentDate,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Row(
@@ -872,35 +881,6 @@ fun PaymentHistoryDialog(
             Button(onClick = onDismiss) { Text("ঠিক আছে") }
         }
     )
-
-    if (paymentToDelete != null) {
-        val p = paymentToDelete!!
-        AlertDialog(
-            onDismissRequest = { paymentToDelete = null },
-            title = { Text("পেমেন্ট ডিলিট নিশ্চিতকরণ") },
-            text = {
-                Text("আপনি কি নিশ্চিতভাবে এই রসিদের পেমেন্ট (৳${p.amountPaid.toInt()} টাকা, রসিদ: ${p.receiptNo}) ডিলিট করতে চান? এটি অ্যাপ এবং ক্লাউড সার্ভার উভয় থেকে স্থায়ীভাবে মুছে যাবে।")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.deleteFeePayment(p.uuid) { success, msg ->
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                        }
-                        paymentToDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("ডিলিট করুন")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { paymentToDelete = null }) {
-                    Text("বাতিল")
-                }
-            }
-        )
-    }
 }
 
 @Composable

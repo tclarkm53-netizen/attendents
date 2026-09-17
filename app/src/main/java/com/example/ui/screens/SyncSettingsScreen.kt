@@ -157,7 +157,7 @@ fun SyncSettingsScreen(viewModel: AttendanceViewModel) {
                 ) {
                     Column {
                         Text(
-                            text = "অফলাইনে জমা ডাটা (Pending Sync):",
+                            text = "অফলাইনে জমা ডাটা :",
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
@@ -280,6 +280,32 @@ fun SyncSettingsScreen(viewModel: AttendanceViewModel) {
             }
         }
 
+        // Offline-First Sync Architecture Info
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "ডুপ্লিকেট ও মিসিং প্রতিরোধ প্রযুক্তি (Zero Data Loss)",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "• অফলাইনে ক্লাস, স্টুডেন্ট বা অ্যাটেন্ডেন্স দিলে তা ডিভাইসের লোকাল SQLite/Room এ সংরক্ষিত থাকে।\n" +
+                            "• প্রতিটি তথ্যের সাথে ইউনিক ক্লায়েন্ট UUID যুক্ত থাকায় নেটওয়ার্কে আসা মাত্র সার্ভারে পাঠিয়ে নিরাপদ Upsert করা হয়।\n" +
+                            "• একই ডাটা একাধিকবার পাঠালেও সার্ভারে কোনো ডুপ্লিকেট এন্ট্রি তৈরি হয় না।",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 20.sp
+                )
+            }
+        }
 
         // User Account Card
         ElevatedCard(
