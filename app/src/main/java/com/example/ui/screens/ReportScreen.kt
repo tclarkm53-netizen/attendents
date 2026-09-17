@@ -636,10 +636,6 @@ fun StudentReportView(
                                 if (report.excused > 0) {
                                     Text("ছুটি: ${report.excused} দিন (হাজিরায় কাউন্ট হয়নি)", color = ExcusedBlue, style = MaterialTheme.typography.labelSmall)
                                 }
-                                if (report.monthlyBreakdown.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("নিচে মাসওয়ারী সামারি শিট যুক্ত করা হয়েছে 📅", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                                }
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
