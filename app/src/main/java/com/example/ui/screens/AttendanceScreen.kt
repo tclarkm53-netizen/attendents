@@ -45,6 +45,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
@@ -58,6 +60,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,8 +73,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.ClassEntity
@@ -105,6 +112,8 @@ fun AttendanceScreen(
     val selectedDate by viewModel.selectedDate.collectAsState()
     val students by viewModel.studentsInSelectedClass.collectAsState()
     val attendanceMap by viewModel.attendanceMap.collectAsState()
+    val hasUnsavedChanges by viewModel.hasUnsavedAttendanceChanges.collectAsState()
+    val isCurrentDateSavedInDb by viewModel.isCurrentDateSavedInDb.collectAsState()
     val isSaving by viewModel.isSaving.collectAsState()
 
     var editingRemarksStudent by remember { mutableStateOf<StudentEntity?>(null) }
@@ -112,9 +121,9 @@ fun AttendanceScreen(
 
     // Date picker dialog
     val calendar = Calendar.getInstance()
-    val datePickerDialog = remember {
+    val datePickerDialog = remember(selectedDate) {
         val parsed = try {
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(selectedDate)
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(selectedDate)
         } catch (e: Exception) {
             null
         }
@@ -142,27 +151,44 @@ fun AttendanceScreen(
         students.filter { viewModel.isStudentAdmittedOnOrBefore(it, selectedDate) }
     }
 
-    // Counts based on visible admitted students
+    // Counts based on visible admitted students (memoized to eliminate scroll & tap lag)
     val totalStudents = visibleStudents.size
-    var presentCount = 0
-    var absentCount = 0
-    var lateCount = 0
-    var excusedCount = 0
-
-    visibleStudents.forEach { s ->
-        val record = attendanceMap[s.uuid]
-        val effectiveStatus = if (record != null) {
-            record.first
-        } else if (isToday) {
-            "PRESENT"
-        } else {
-            "UNRECORDED"
+    val counts = remember(visibleStudents, attendanceMap) {
+        var p = 0
+        var a = 0
+        var l = 0
+        var e = 0
+        var u = 0
+        visibleStudents.forEach { s ->
+            val record = attendanceMap[s.uuid]
+            val effectiveStatus = record?.first ?: ""
+            when (effectiveStatus) {
+                "PRESENT" -> p++
+                "ABSENT" -> a++
+                "LATE" -> l++
+                "EXCUSED" -> e++
+                else -> u++
+            }
         }
-        when (effectiveStatus) {
-            "PRESENT" -> presentCount++
-            "ABSENT" -> absentCount++
-            "LATE" -> lateCount++
-            "EXCUSED" -> excusedCount++
+        arrayOf(p, a, l, e, u)
+    }
+    val presentCount = counts[0]
+    val absentCount = counts[1]
+    val lateCount = counts[2]
+    val excusedCount = counts[3]
+    val unmarkedCount = counts[4]
+    val hasEntry = remember(totalStudents, unmarkedCount) {
+        totalStudents > 0 && unmarkedCount < totalStudents
+    }
+
+    val isFriday = remember(selectedDate) {
+        try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val parsed = sdf.parse(selectedDate)
+            val cal = Calendar.getInstance().apply { time = parsed ?: Date() }
+            cal.get(Calendar.DAY_OF_WEEK) == Calendar.FRIDAY
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -270,13 +296,18 @@ fun AttendanceScreen(
                         }
                     }
 
-                    // Date Mode Indicator Banner
+                    // Date Mode & Entry Status Indicator Banner
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 8.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isToday) PresentContainer else MaterialTheme.colorScheme.surfaceVariant
+                            containerColor = when {
+                                isFuture -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f)
+                                hasUnsavedChanges -> LateContainer
+                                isCurrentDateSavedInDb && hasEntry -> PresentContainer
+                                else -> MaterialTheme.colorScheme.surfaceVariant
+                            }
                         ),
                         shape = RoundedCornerShape(8.dp)
                     ) {
@@ -292,21 +323,58 @@ fun AttendanceScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
-                                    imageVector = if (isToday) Icons.Default.CheckCircle else Icons.Default.Lock,
+                                    imageVector = when {
+                                        isFuture -> Icons.Default.Lock
+                                        hasUnsavedChanges -> Icons.Default.Info
+                                        isCurrentDateSavedInDb && hasEntry -> Icons.Default.CheckCircle
+                                        else -> Icons.Default.CalendarMonth
+                                    },
                                     contentDescription = null,
-                                    tint = if (isToday) PresentGreen else MaterialTheme.colorScheme.primary,
+                                    tint = when {
+                                        isFuture -> MaterialTheme.colorScheme.error
+                                        hasUnsavedChanges -> LateAmber
+                                        isCurrentDateSavedInDb && hasEntry -> PresentGreen
+                                        else -> MaterialTheme.colorScheme.primary
+                                    },
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (isToday) "🟢 আজকের হাজিরা গ্রহণ ও পরিবর্তন চালু আছে"
-                                    else if (isPast) "🔒 পুরাতন হাজিরা (কেবল দেখার জন্য, পরিবর্তন বন্ধ)"
-                                    else "🔒 ভবিষ্যতের তারিখ (হাজিরা পরিবর্তন বন্ধ)",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium
-                                    ),
-                                    color = if (isToday) PresentOnContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Column(modifier = Modifier.weight(1f, fill = false)) {
+                                    Text(
+                                        text = when {
+                                            isFuture -> "🔒 অগ্রিম তারিখ (${selectedDate}) — ভবিষ্যতের হাজিরা লক করা আছে"
+                                            hasUnsavedChanges -> "⚠️ হাজিরা এডিট করা হয়েছে (${totalStudents - unmarkedCount}/${totalStudents}) — আনসেভড"
+                                            isCurrentDateSavedInDb && hasEntry -> "✅ এই তারিখের (${selectedDate}) হাজিরা সংরক্ষিত (${totalStudents - unmarkedCount}/${totalStudents})"
+                                            else -> "⚪ এই তারিখে এখনও কোনো হাজিরা নেওয়া হয়নি (নন-এন্ট্রি ডেট)"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = when {
+                                            isFuture -> MaterialTheme.colorScheme.onErrorContainer
+                                            hasUnsavedChanges -> LateOnContainer
+                                            isCurrentDateSavedInDb && hasEntry -> PresentOnContainer
+                                            else -> MaterialTheme.colorScheme.onSurface
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val subHint = when {
+                                        isFuture -> "অগ্রিম তারিখে হাজিরা মার্ক বা সেভ করা যাবে না"
+                                        hasUnsavedChanges -> "রিপোর্টে যুক্ত করতে নিচের 'সেভ করুন (Save)' বাটনে চাপুন"
+                                        !hasEntry -> "হাজিরা দিতে শিক্ষার্থীদের চেকবক্সে টিক দিন বা 'সবাই উপস্থিত' চাপুন"
+                                        else -> ""
+                                    }
+                                    if (subHint.isNotBlank()) {
+                                        Text(
+                                            text = subHint,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                             }
                             if (!isToday) {
                                 TextButton(
@@ -316,6 +384,47 @@ fun AttendanceScreen(
                                     Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("আজকের তারিখ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // Friday Auto-Skip Notification Banner
+                    if (isFriday) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.EventBusy,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "🕌 শুক্রবার - সাপ্তাহিক ছুটি (অটো-স্কিপ সক্রিয়)",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Text(
+                                        text = "শুক্রবার রিপোর্টে কাউন্ট হবে না ও গড় উপস্থিতিতে প্রভাব ফেলবে না (সপ্তাহে ৬ দিন ও মাসে ২৪ দিন = ১০০% উপস্থিতি)।",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                                        lineHeight = 14.sp
+                                    )
                                 }
                             }
                         }
@@ -331,47 +440,89 @@ fun AttendanceScreen(
                         StatBadge(label = "ভর্তিকৃত", count = totalStudents, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                         StatBadge(label = "উপস্থিত", count = presentCount, color = PresentGreen, modifier = Modifier.weight(1f))
                         StatBadge(label = "অনুপস্থিত", count = absentCount, color = AbsentRed, modifier = Modifier.weight(1f))
-                        StatBadge(label = "দেরি", count = lateCount, color = LateAmber, modifier = Modifier.weight(1f))
-                        if (excusedCount > 0) {
-                            StatBadge(label = "ছুটি", count = excusedCount, color = ExcusedBlue, modifier = Modifier.weight(1f))
-                        }
-                    }
-                    if (excusedCount > 0) {
-                        Text(
-                            text = "ℹ️ ছুটিপ্রাপ্ত ($excusedCount জন) শিক্ষার্থীর উপস্থিতি/অনুপস্থিতি হিসেবে কাউন্ট হবে না",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ExcusedBlue,
-                            modifier = Modifier.padding(top = 4.dp, start = 2.dp)
-                        )
+                        StatBadge(label = "অনির্ধারিত", count = unmarkedCount, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                     }
 
-                    // Quick Actions (Mark All) - Only enabled & visible for TODAY
-                    if (isToday) {
+                    // Quick Actions (Master Toggleable Checkbox & Mark All Buttons) - Locked on Future Dates
+                    if (visibleStudents.isNotEmpty() && !isFuture) {
+                        val selectAllState = remember(presentCount, totalStudents) {
+                            when {
+                                totalStudents == 0 || presentCount == 0 -> ToggleableState.Off
+                                presentCount == totalStudents -> ToggleableState.On
+                                else -> ToggleableState.Indeterminate
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(10.dp))
+
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                                .clickable {
+                                    if (selectAllState == ToggleableState.On) {
+                                        viewModel.markAll("ABSENT")
+                                    } else {
+                                        viewModel.markAll("PRESENT")
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            OutlinedButton(
-                                onClick = { viewModel.markAll("PRESENT") },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = PresentGreen)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("সবাই উপস্থিত", fontSize = 12.sp)
+                                TriStateCheckbox(
+                                    state = selectAllState,
+                                    onClick = {
+                                        if (selectAllState == ToggleableState.On) {
+                                            viewModel.markAll("ABSENT")
+                                        } else {
+                                            viewModel.markAll("PRESENT")
+                                        }
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = PresentGreen,
+                                        checkmarkColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .testTag("select_all_attendance_checkbox")
+                                        .semantics {
+                                            contentDescription = "Toggle all students present"
+                                        }
+                                )
+                                Text(
+                                    text = "সবাই উপস্থিত মার্ক করুন (${presentCount}/${totalStudents})",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
                             }
 
-                            OutlinedButton(
-                                onClick = { viewModel.markAll("ABSENT") },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AbsentRed)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("সবাই অনুপস্থিত", fontSize = 12.sp)
+                                TextButton(
+                                    onClick = { viewModel.markAll("ABSENT") },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.textButtonColors(contentColor = AbsentRed)
+                                ) {
+                                    Text("সবাই অনুপস্থিত", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                }
+
+                                TextButton(
+                                    onClick = { viewModel.unmarkAll() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                                ) {
+                                    Text("ক্লিয়ার", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                }
                             }
                         }
                     }
@@ -423,48 +574,36 @@ fun AttendanceScreen(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("student_attendance_list"),
                     contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 80.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(visibleStudents, key = { it.uuid }) { student ->
                         val record = attendanceMap[student.uuid]
-                        val currentStatus = if (record != null) {
-                            record.first
-                        } else if (isToday) {
-                            "PRESENT"
-                        } else {
-                            "UNRECORDED"
-                        }
+                        val currentStatus = record?.first ?: ""
                         val currentRemarks = record?.second ?: ""
 
                         StudentAttendanceCard(
                             student = student,
                             status = currentStatus,
                             remarks = currentRemarks,
-                            isEditable = isToday,
+                            isEditable = true,
                             onStatusSelected = { newStatus ->
-                                if (isToday) {
-                                    viewModel.markStudent(student.uuid, newStatus)
+                                if (currentStatus == newStatus) {
+                                    viewModel.markStudent(student.uuid, "") // unmark if tapped again
                                 } else {
-                                    Toast.makeText(
-                                        context,
-                                        "শুধুমাত্র আজকের ($todayDateStr) হাজিরা পরিবর্তন করা যাবে",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    viewModel.markStudent(student.uuid, newStatus)
                                 }
                             },
+                            onCheckboxToggled = { isChecked ->
+                                val newStatus = if (isChecked) "PRESENT" else "ABSENT"
+                                viewModel.markStudent(student.uuid, newStatus)
+                            },
                             onEditRemarks = {
-                                if (isToday) {
-                                    editingRemarksStudent = student
-                                    currentRemarksText = currentRemarks
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        "শুধুমাত্র আজকের ($todayDateStr) হাজিরা মন্তব্য পরিবর্তন করা যাবে",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
+                                editingRemarksStudent = student
+                                currentRemarksText = currentRemarks
                             }
                         )
                     }
@@ -472,8 +611,8 @@ fun AttendanceScreen(
             }
         }
 
-        // Save Attendance Floating Action Button - Only available on TODAY
-        if (isToday && visibleStudents.isNotEmpty()) {
+        // Save Attendance Floating Action Button - Available for any selected date
+        if (visibleStudents.isNotEmpty()) {
             FloatingActionButton(
                 onClick = {
                     viewModel.saveAttendance { success, msg ->
@@ -563,12 +702,15 @@ fun StatBadge(
             Text(
                 text = "$count",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = color
+                color = color,
+                maxLines = 1
             )
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = color
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -581,8 +723,25 @@ fun StudentAttendanceCard(
     remarks: String,
     isEditable: Boolean = true,
     onStatusSelected: (String) -> Unit,
+    onCheckboxToggled: (Boolean) -> Unit = {},
     onEditRemarks: () -> Unit
 ) {
+    val isPresent = status == "PRESENT"
+    val statusBadgeText = when (status) {
+        "PRESENT" -> "✅ উপস্থিত (Present)"
+        "ABSENT" -> "❌ অনুপস্থিত (Absent)"
+        "LATE" -> "⏰ দেরি (Late)"
+        "EXCUSED" -> "📅 ছুটি (Excused)"
+        else -> "⚪ চেকবক্সে টিক দিন (Unmarked)"
+    }
+    val statusBadgeColor = when (status) {
+        "PRESENT" -> PresentGreen
+        "ABSENT" -> AbsentRed
+        "LATE" -> LateAmber
+        "EXCUSED" -> ExcusedBlue
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+    }
+
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -598,49 +757,87 @@ fun StudentAttendanceCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = isEditable) {
+                            onCheckboxToggled(!isPresent)
+                        }
                 ) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
+                            .background(
+                                if (isPresent) PresentContainer
+                                else MaterialTheme.colorScheme.primaryContainer
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = student.rollNumber,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 13.sp
+                            color = if (isPresent) PresentGreen else MaterialTheme.colorScheme.primary,
+                            fontSize = 13.sp,
+                            maxLines = 1
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
                         Text(
                             text = student.name,
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        if (remarks.isNotBlank()) {
-                            Text(
-                                text = "নোট: $remarks",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                        val subInfo = if (remarks.isNotBlank()) {
+                            "$statusBadgeText • নোট: $remarks"
+                        } else {
+                            statusBadgeText
                         }
+                        Text(
+                            text = subInfo,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = if (status.isNotBlank()) FontWeight.SemiBold else FontWeight.Normal
+                            ),
+                            color = statusBadgeColor,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
                 if (isEditable) {
-                    IconButton(
-                        onClick = onEditRemarks,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = "Edit Remarks",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onEditRemarks,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Edit Remarks",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Checkbox(
+                            checked = isPresent,
+                            onCheckedChange = { checked ->
+                                onCheckboxToggled(checked)
+                            },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = PresentGreen,
+                                checkmarkColor = Color.White,
+                                uncheckedColor = if (status == "ABSENT") AbsentRed else MaterialTheme.colorScheme.outline
+                            ),
+                            modifier = Modifier
+                                .testTag("student_checkbox_${student.rollNumber}")
+                                .semantics {
+                                    contentDescription = "Mark ${student.name} attendance"
+                                }
                         )
                     }
                 }
@@ -726,7 +923,7 @@ fun StudentAttendanceCard(
                     "PRESENT" -> "উপস্থিত (Present)"
                     "ABSENT" -> "অনুপস্থিত (Absent)"
                     "LATE" -> "দেরিতে উপস্থিতি (Late)"
-                    "EXCUSED" -> "ছুটি অনুমোদিত (গণনার বাইরে)"
+                    "EXCUSED" -> "ছুটি অনুমোদিত (Excused)"
                     else -> "হাজিরা নেওয়া হয়নি (Not Recorded)"
                 }
                 val statusIcon = when (status) {
@@ -814,13 +1011,16 @@ fun StatusButton(
             Text(
                 text = label,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = if (isSelected) activeTextColor else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (isSelected) activeTextColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
             )
             Text(
                 text = subText,
                 style = MaterialTheme.typography.labelSmall,
                 fontSize = 9.sp,
-                color = if (isSelected) activeTextColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = if (isSelected) activeTextColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

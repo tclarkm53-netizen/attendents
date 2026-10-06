@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Preview
@@ -58,6 +59,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
+import com.example.data.repository.getBengaliDayOfWeek
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -87,8 +89,6 @@ import com.example.data.model.ReportCardDesignConfig
 import com.example.data.model.ReportCardTheme
 import com.example.data.repository.SingleStudentReportData
 import com.example.ui.theme.AbsentRed
-import com.example.ui.theme.ExcusedBlue
-import com.example.ui.theme.LateAmber
 import com.example.ui.theme.PresentGreen
 import com.example.ui.viewmodel.AttendanceViewModel
 import com.example.utils.PdfReportGenerator
@@ -108,19 +108,65 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
     val selectedClass by viewModel.selectedClass.collectAsState()
     val students by viewModel.studentsInSelectedClass.collectAsState()
     val activeUser by viewModel.activeUser.collectAsState()
+    val selectedDate by viewModel.selectedDate.collectAsState()
+    val attendanceUpdateVersion by viewModel.attendanceUpdateVersion.collectAsState()
+    val isSaving by viewModel.isSaving.collectAsState()
 
     var selectedStudent by remember { mutableStateOf<StudentEntity?>(null) }
 
-    // Date range setup
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val now = Calendar.getInstance()
+    // Date range setup (always use Locale.US so digits match YYYY-MM-DD in SQLite)
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val todayStr = dateFormat.format(Date())
 
     val startOfMonthCal = Calendar.getInstance().apply {
         set(Calendar.DAY_OF_MONTH, 1)
     }
     var fromDate by remember { mutableStateOf(dateFormat.format(startOfMonthCal.time)) }
-    var toDate by remember { mutableStateOf(dateFormat.format(now.time)) }
+    var toDate by remember { mutableStateOf(todayStr) }
     var datePreset by remember { mutableStateOf("THIS_MONTH") }
+
+    // Keep THIS_MONTH / LAST_30 end date up-to-date with current date
+    LaunchedEffect(todayStr, selectedDate, datePreset) {
+        if (datePreset == "THIS_MONTH" || datePreset == "LAST_30") {
+            if (toDate < todayStr) {
+                toDate = todayStr
+            }
+        }
+    }
+
+    val fromCalendar = Calendar.getInstance()
+    val fromDatePickerDialog = remember(context) {
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val selectedCal = Calendar.getInstance().apply {
+                    set(year, month, dayOfMonth)
+                }
+                fromDate = dateFormat.format(selectedCal.time)
+                datePreset = "CUSTOM"
+            },
+            fromCalendar.get(Calendar.YEAR),
+            fromCalendar.get(Calendar.MONTH),
+            fromCalendar.get(Calendar.DAY_OF_MONTH)
+        )
+    }
+
+    val toCalendar = Calendar.getInstance()
+    val toDatePickerDialog = remember(context) {
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val selectedCal = Calendar.getInstance().apply {
+                    set(year, month, dayOfMonth)
+                }
+                toDate = dateFormat.format(selectedCal.time)
+                datePreset = "CUSTOM"
+            },
+            toCalendar.get(Calendar.YEAR),
+            toCalendar.get(Calendar.MONTH),
+            toCalendar.get(Calendar.DAY_OF_MONTH)
+        )
+    }
 
     val classReportData by viewModel.classReportData.collectAsState()
     val studentReportData by viewModel.studentReportData.collectAsState()
@@ -154,12 +200,14 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
         }
     }
 
-    // Auto trigger report when parameters change
-    LaunchedEffect(reportType, selectedClass, selectedStudent, fromDate, toDate) {
-        if (reportType == 0 && selectedClass != null) {
-            viewModel.loadClassReport(selectedClass!!.uuid, fromDate, toDate)
-        } else if ((reportType == 1 || reportType == 2) && selectedStudent != null) {
-            viewModel.loadStudentReport(selectedStudent!!.uuid, fromDate, toDate)
+    // Auto trigger report when parameters or saved attendance change
+    LaunchedEffect(reportType, selectedClass, selectedStudent, fromDate, toDate, attendanceUpdateVersion, isSaving) {
+        if (!isSaving) {
+            if (reportType == 0 && selectedClass != null) {
+                viewModel.loadClassReport(selectedClass!!.uuid, fromDate, toDate)
+            } else if ((reportType == 1 || reportType == 2) && selectedStudent != null) {
+                viewModel.loadStudentReport(selectedStudent!!.uuid, fromDate, toDate)
+            }
         }
     }
 
@@ -278,7 +326,7 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Date Presets
+                // Date Presets (চলতি মাস, গত ৩০ দিন, কাষ্টম ডেট)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -310,24 +358,68 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                     )
 
                     FilterChip(
-                        selected = datePreset == "TODAY",
+                        selected = datePreset == "CUSTOM",
                         onClick = {
-                            datePreset = "TODAY"
-                            val todayStr = dateFormat.format(Date())
-                            fromDate = todayStr
-                            toDate = todayStr
+                            datePreset = "CUSTOM"
+                            fromDatePickerDialog.show()
                         },
-                        label = { Text("আজকে", fontSize = 11.sp) },
+                        label = { Text("কাষ্টম ডেট", fontSize = 11.sp) },
                         modifier = Modifier.weight(1f)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "সময়কাল: $fromDate থেকে $toDate",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Custom Date Range Interactive Selector
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { fromDatePickerDialog.show() },
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("শুরুর তারিখ", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(fromDate, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+
+                    Text("থেকে", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { toDatePickerDialog.show() },
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("শেষের তারিখ", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(toDate, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -381,8 +473,8 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                                 return@OutlinedButton
                             }
                             val pdf = PdfReportGenerator.generateClassReportPdf(context, report, institution)
-                            val uri = PdfReportGenerator.savePdfToDownloads(context, pdf)
-                            Toast.makeText(context, if (uri != null) "PDF সংরক্ষিত: Downloads/AttendanceReports" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
+                            val res = PdfReportGenerator.savePdfToAttendentFolder(context, pdf)
+                            Toast.makeText(context, if (res.uri != null) "PDF সংরক্ষিত: attendent ফোল্ডারে" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
                         } else {
                             val report = studentReportData
                             if (report == null) {
@@ -390,8 +482,8 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                                 return@OutlinedButton
                             }
                             val pdf = PdfReportGenerator.generateStudentReportPdf(context, report, institution)
-                            val uri = PdfReportGenerator.savePdfToDownloads(context, pdf)
-                            Toast.makeText(context, if (uri != null) "PDF সংরক্ষিত: Downloads/AttendanceReports" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
+                            val res = PdfReportGenerator.savePdfToAttendentFolder(context, pdf)
+                            Toast.makeText(context, if (res.uri != null) "PDF সংরক্ষিত: attendent ফোল্ডারে" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
                         }
                     },
                     modifier = Modifier
@@ -439,8 +531,8 @@ fun ReportScreen(viewModel: AttendanceViewModel) {
                     PdfReportGenerator.printPdf(context, pdf, "Custom_ReportCard_${studentReportData?.student?.name ?: "Student"}")
                 },
                 onSaveCustomCard = { pdf ->
-                    val uri = PdfReportGenerator.savePdfToDownloads(context, pdf)
-                    Toast.makeText(context, if (uri != null) "কাস্টমাইজড রিপোর্ট কার্ড সেভ হয়েছে: Downloads/AttendanceReports" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
+                    val res = PdfReportGenerator.savePdfToAttendentFolder(context, pdf)
+                    Toast.makeText(context, if (res.uri != null) "কাস্টমাইজড রিপোর্ট কার্ড সেভ হয়েছে: attendent ফোল্ডারে" else "PDF সেভ হয়েছে", Toast.LENGTH_LONG).show()
                 },
                 onShareCustomCard = { pdf ->
                     try {
@@ -514,6 +606,33 @@ fun ClassReportView(report: com.example.data.repository.ClassReportData?) {
                                 .clip(RoundedCornerShape(4.dp)),
                             color = if (report.overallPercentage >= 75f) PresentGreen else AbsentRed
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.EventBusy,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "🕌 শুক্রবার ও ছুটি অটো-স্কিপ: শুধুমাত্র উপস্থিত, অনুপস্থিত ও লেট কাউন্ট করে সপ্তাহে ৬ দিন ও মাসে ২৪ দিন কার্যদিবসে ১০০% উপস্থিতি নির্ণিত (ছুটি ও শুক্রবার হিসাবে কোনো প্রভাব ফেলে না)",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -626,15 +745,16 @@ fun StudentReportView(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text("মোট ক্লাস: ${report.totalDays} দিন", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                                Text("উপস্থিত: ${report.present} দিন", color = PresentGreen, fontWeight = FontWeight.Bold)
-                                Text("অনুপস্থিত: ${report.absent} দিন", color = AbsentRed)
-                                Text("দেরি: ${report.late} দিন", color = LateAmber)
+                                Text("মোট ক্লাস: ${report.totalDays} দিন (P+A+L)", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                                Text("উপস্থিত: ${report.present} দিন", color = PresentGreen, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                Text("অনুপস্থিত: ${report.absent} দিন", color = AbsentRed, style = MaterialTheme.typography.bodySmall)
+                                Text("দেরি: ${report.late} দিন", color = Color(0xFFD97706), style = MaterialTheme.typography.bodySmall)
                                 if (report.excused > 0) {
-                                    Text("ছুটি: ${report.excused} দিন (হাজিরায় কাউন্ট হয়নি)", color = ExcusedBlue, style = MaterialTheme.typography.labelSmall)
+                                    Text("ছুটি: ${report.excused} দিন (কাউন্ট বাদ)", color = Color(0xFF2563EB), style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                             Column(horizontalAlignment = Alignment.End) {
@@ -644,6 +764,33 @@ fun StudentReportView(
                                     color = if (report.percentage >= 75f) PresentGreen else AbsentRed
                                 )
                                 Text("উপস্থিতির হার", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.EventBusy,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "🕌 শুক্রবার ও ছুটি অটো-স্কিপ: শুধুমাত্র উপস্থিত, অনুপস্থিত ও লেট কাউন্ট করে সপ্তাহে ৬ দিন ও মাসে ২৪ দিন কার্যদিবসে ১০০% উপস্থিতি নির্ণিত (ছুটি ও শুক্রবার হিসাবে কোনো প্রভাব ফেলে না)",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                             }
                         }
                     }
@@ -659,6 +806,7 @@ fun StudentReportView(
             }
 
             items(report.records, key = { it.uuid }) { record ->
+                val dayOfWeekBangla = getBengaliDayOfWeek(record.date)
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
@@ -672,7 +820,18 @@ fun StudentReportView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text(text = record.date, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = record.date, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                if (dayOfWeekBangla.isNotBlank()) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "• $dayOfWeekBangla",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                             if (record.remarks.isNotBlank()) {
                                 Text(
                                     text = "মন্তব্য: ${record.remarks}",
@@ -692,7 +851,7 @@ fun StudentReportView(
                             "PRESENT" -> "উপস্থিত (P)"
                             "ABSENT" -> "অনুপস্থিত (A)"
                             "LATE" -> "দেরি (L)"
-                            else -> "ছুটি (E)"
+                            else -> "ছুটি (কাউন্ট বাদ)"
                         }
 
                         Box(
@@ -1111,15 +1270,6 @@ fun InteractiveReportCardPreview(
                 KpiCard(title = "উপস্থিত", value = "${report.present}", color = Color(0xFFF0FDF4), valueColor = PresentGreen, modifier = Modifier.weight(1f))
                 KpiCard(title = "অনুপস্থিত", value = "${report.absent}", color = Color(0xFFFEF2F2), valueColor = AbsentRed, modifier = Modifier.weight(1f))
                 KpiCard(title = "বিলম্ব", value = "${report.late}", color = Color(0xFFFFFBEB), valueColor = Color(0xFFD97706), modifier = Modifier.weight(1f))
-            }
-
-            if (report.excused > 0) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "* অনুমোদিত ছুটি (${report.excused} দিন) মোট কর্মদিবস ও হাজিরা গণনায় কাউন্ট করা হয়নি।",
-                    fontSize = 10.sp,
-                    color = ExcusedBlue
-                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))

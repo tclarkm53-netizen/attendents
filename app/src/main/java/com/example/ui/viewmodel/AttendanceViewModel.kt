@@ -14,10 +14,12 @@ import com.example.data.repository.ClassReportData
 import com.example.data.repository.SingleStudentReportData
 import com.example.data.repository.StudentFeeSummary
 import com.example.data.repository.SyncStatus
+import com.example.data.repository.normalizeDateStr
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -31,7 +33,10 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     val repository = AttendanceRepository(application)
     private val apiClient = ApiClient.getInstance(application)
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+
+    private val _isAuthChecking = MutableStateFlow(true)
+    val isAuthChecking: StateFlow<Boolean> = _isAuthChecking.asStateFlow()
 
     val activeUser: StateFlow<UserEntity?> = repository.activeUser.stateIn(
         scope = viewModelScope,
@@ -62,9 +67,11 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     val selectedDate: StateFlow<String> = _selectedDate.asStateFlow()
 
     // Students in selected class
-    val studentsInSelectedClass: StateFlow<List<StudentEntity>> = _selectedClass.flatMapLatest { cls ->
-        if (cls != null) {
-            repository.getStudentsByClass(cls.uuid)
+    val studentsInSelectedClass: StateFlow<List<StudentEntity>> = combine(_selectedClass, activeUser) { cls, user ->
+        Pair(cls, user)
+    }.flatMapLatest { (cls, user) ->
+        if (cls != null && user != null) {
+            repository.getStudentsByClass(cls.uuid, user.uuid)
         } else {
             flowOf(emptyList())
         }
@@ -77,6 +84,18 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     // Current attendance state: studentUuid -> Pair(status, remarks)
     private val _attendanceMap = MutableStateFlow<Map<String, Pair<String, String>>>(emptyMap())
     val attendanceMap: StateFlow<Map<String, Pair<String, String>>> = _attendanceMap.asStateFlow()
+
+    // Tracks whether the user has unsaved edits in the UI so background sync never overwrites them
+    private val _hasUnsavedAttendanceChanges = MutableStateFlow(false)
+    val hasUnsavedAttendanceChanges: StateFlow<Boolean> = _hasUnsavedAttendanceChanges.asStateFlow()
+
+    // Tracks whether current date's attendance exists in local DB
+    private val _isCurrentDateSavedInDb = MutableStateFlow(false)
+    val isCurrentDateSavedInDb: StateFlow<Boolean> = _isCurrentDateSavedInDb.asStateFlow()
+
+    // Increments whenever attendance is saved so ReportScreen immediately refreshes
+    private val _attendanceUpdateVersion = MutableStateFlow(0L)
+    val attendanceUpdateVersion: StateFlow<Long> = _attendanceUpdateVersion.asStateFlow()
 
     private val _isSaving = MutableStateFlow(false)
     val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
@@ -108,11 +127,31 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     init {
         // Observe active user changes to auto-select first class & sync unsynced count
         viewModelScope.launch {
-            activeUser.collect { user ->
+            repository.activeUser.collect { user ->
+                _isAuthChecking.value = false
                 if (user != null) {
+                    triggerSync()
                     repository.getUnsyncedCount(user.uuid).collect { count ->
                         _unsyncedCount.value = count
                     }
+                } else {
+                    _selectedClass.value = null
+                    _attendanceMap.value = emptyMap()
+                    _classReportData.value = null
+                    _studentReportData.value = null
+                    _classFeeSummaries.value = emptyList()
+                    _unsyncedCount.value = 0
+                }
+            }
+        }
+
+        // Real-time background sync every 20 seconds
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(20_000)
+                val user = activeUser.value
+                if (user != null && repository.isNetworkAvailable()) {
+                    repository.performSync(user.uuid)
                 }
             }
         }
@@ -147,23 +186,32 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun selectClass(classEntity: ClassEntity) {
-        _selectedClass.value = classEntity
+        if (_selectedClass.value?.uuid != classEntity.uuid) {
+            _hasUnsavedAttendanceChanges.value = false
+            _selectedClass.value = classEntity
+        }
     }
 
     fun setSelectedDate(dateStr: String) {
-        _selectedDate.value = dateStr
+        val norm = normalizeDateStr(dateStr)
+        if (_selectedDate.value != norm) {
+            _hasUnsavedAttendanceChanges.value = false
+            _selectedDate.value = norm
+        }
     }
 
     fun changeDateByDays(offset: Int) {
         try {
             val cal = Calendar.getInstance()
-            val parsed = dateFormat.parse(_selectedDate.value)
+            val parsed = dateFormat.parse(normalizeDateStr(_selectedDate.value))
             if (parsed != null) {
                 cal.time = parsed
                 cal.add(Calendar.DAY_OF_YEAR, offset)
+                _hasUnsavedAttendanceChanges.value = false
                 _selectedDate.value = dateFormat.format(cal.time)
             }
         } catch (e: Exception) {
+            _hasUnsavedAttendanceChanges.value = false
             _selectedDate.value = dateFormat.format(Date())
         }
     }
@@ -172,10 +220,13 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     fun getTodayDateString(): String = dateFormat.format(Date())
 
-    fun isCurrentDateSelected(): Boolean = _selectedDate.value == getTodayDateString()
+    fun isCurrentDateSelected(): Boolean = normalizeDateStr(_selectedDate.value) == getTodayDateString()
+
+    fun isFutureDateSelected(): Boolean = normalizeDateStr(_selectedDate.value) > getTodayDateString()
 
     fun isStudentAdmittedOnOrBefore(student: StudentEntity, targetDateStr: String): Boolean {
-        val admStr = student.admissionDate.trim()
+        val admStr = normalizeDateStr(student.admissionDate)
+        val normTarget = normalizeDateStr(targetDateStr)
         if (admStr.isEmpty()) {
             val createdCal = Calendar.getInstance().apply { timeInMillis = student.createdAt }
             val createdDate = String.format(
@@ -184,94 +235,143 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
                 createdCal.get(Calendar.MONTH) + 1,
                 createdCal.get(Calendar.DAY_OF_MONTH)
             )
-            return targetDateStr >= createdDate
+            return normTarget >= createdDate
         }
         return try {
             val admDate = dateFormat.parse(admStr)
-            val targetDate = dateFormat.parse(targetDateStr)
+            val targetDate = dateFormat.parse(normTarget)
             if (admDate != null && targetDate != null) {
                 !targetDate.before(admDate)
             } else {
-                targetDateStr >= admStr
+                normTarget >= admStr
             }
         } catch (e: Exception) {
-            targetDateStr >= admStr
+            normTarget >= admStr
         }
     }
 
     fun loadAttendanceForCurrentSelection() {
         val cls = _selectedClass.value ?: run {
             _attendanceMap.value = emptyMap()
+            _hasUnsavedAttendanceChanges.value = false
+            _isCurrentDateSavedInDb.value = false
             return
         }
-        val date = _selectedDate.value
+        val user = activeUser.value ?: run {
+            _attendanceMap.value = emptyMap()
+            _hasUnsavedAttendanceChanges.value = false
+            _isCurrentDateSavedInDb.value = false
+            return
+        }
+        val date = normalizeDateStr(_selectedDate.value)
+        _hasUnsavedAttendanceChanges.value = false
         attendanceJob?.cancel()
         attendanceJob = viewModelScope.launch {
-            repository.getAttendanceForClassAndDate(cls.uuid, date).collect { records ->
-                val map = records.associate { it.studentUuid to Pair(it.status, it.remarks) }
-                _attendanceMap.value = map
+            repository.getAttendanceForClassAndDate(cls.uuid, date, user.uuid).collect { records ->
+                _isCurrentDateSavedInDb.value = records.isNotEmpty()
+                // Do NOT overwrite UI state if the user has unsaved edits in progress
+                if (!_hasUnsavedAttendanceChanges.value) {
+                    val map = records.associate { it.studentUuid to Pair(it.status, it.remarks) }
+                    if (_attendanceMap.value != map) {
+                        _attendanceMap.value = map
+                    }
+                }
             }
         }
     }
 
     fun markStudent(studentUuid: String, status: String, remarks: String = "") {
-        if (!isCurrentDateSelected()) return
-
+        // Lock future dates: advance dates cannot be marked or edited
+        if (isFutureDateSelected()) return
         val current = _attendanceMap.value.toMutableMap()
         val oldRemarks = current[studentUuid]?.second ?: ""
         current[studentUuid] = Pair(status, if (remarks.isNotBlank()) remarks else oldRemarks)
+        _hasUnsavedAttendanceChanges.value = true
         _attendanceMap.value = current
     }
 
     fun markAll(status: String) {
-        if (!isCurrentDateSelected()) return
-
-        val date = _selectedDate.value
-        val admittedStudents = studentsInSelectedClass.value.filter { isStudentAdmittedOnOrBefore(it, date) }
+        if (isFutureDateSelected()) return
+        val date = normalizeDateStr(_selectedDate.value)
+        val isToday = date == getTodayDateString()
+        val admittedStudents = if (isToday) {
+            studentsInSelectedClass.value
+        } else {
+            studentsInSelectedClass.value.filter { isStudentAdmittedOnOrBefore(it, date) }
+        }
         val current = _attendanceMap.value.toMutableMap()
         for (s in admittedStudents) {
             val oldRemarks = current[s.uuid]?.second ?: ""
             current[s.uuid] = Pair(status, oldRemarks)
         }
+        _hasUnsavedAttendanceChanges.value = true
         _attendanceMap.value = current
+    }
+
+    fun unmarkAll() {
+        if (isFutureDateSelected()) return
+        _hasUnsavedAttendanceChanges.value = true
+        _attendanceMap.value = emptyMap()
     }
 
     fun saveAttendance(onComplete: (Boolean, String) -> Unit) {
         val user = activeUser.value ?: return onComplete(false, "লগইন করা আবশ্যক")
         val cls = _selectedClass.value ?: return onComplete(false, "কোনো ক্লাস নির্বাচন করা হয়নি")
-        val date = _selectedDate.value
-        val today = getTodayDateString()
+        val date = normalizeDateStr(_selectedDate.value)
+        val todayStr = getTodayDateString()
 
-        if (date != today) {
-            return onComplete(false, "শুধুমাত্র আজকের ($today) হাজিরা পরিবর্তন ও সংরক্ষণ করা যাবে।")
+        if (date > todayStr) {
+            return onComplete(false, "অগ্রিম তারিখে হাজিরা লক করা আছে। শুধুমাত্র আজকের বা পূর্ববর্তী তারিখের হাজিরা সেভ করা যাবে।")
         }
 
-        val admittedStudents = studentsInSelectedClass.value.filter { isStudentAdmittedOnOrBefore(it, date) }
-        if (admittedStudents.isEmpty()) {
+        val allClassStudents = studentsInSelectedClass.value
+        val admittedStudents = if (date == todayStr) {
+            allClassStudents
+        } else {
+            allClassStudents.filter { isStudentAdmittedOnOrBefore(it, date) }
+        }
+        if (admittedStudents.isEmpty() && allClassStudents.isEmpty()) {
             return onComplete(false, "এই তারিখে কোনো ভর্তিকৃত শিক্ষার্থী নেই")
         }
 
         val currentMap = _attendanceMap.value
-        val completeMap = mutableMapOf<String, Pair<String, String>>()
-        for (s in admittedStudents) {
+        val markedMap = mutableMapOf<String, Pair<String, String>>()
+        val candidateStudents = if (admittedStudents.isNotEmpty()) admittedStudents else allClassStudents
+        for (s in candidateStudents) {
             val existing = currentMap[s.uuid]
-            val status = existing?.first ?: "PRESENT"
-            val remarks = existing?.second ?: ""
-            completeMap[s.uuid] = Pair(status, remarks)
+            if (existing != null && existing.first.isNotBlank()) {
+                markedMap[s.uuid] = existing
+            }
+        }
+        // Also ensure any student explicitly marked in currentMap for this class is never dropped
+        for (s in allClassStudents) {
+            val existing = currentMap[s.uuid]
+            if (existing != null && existing.first.isNotBlank()) {
+                markedMap[s.uuid] = existing
+            }
+        }
+
+        if (markedMap.isEmpty()) {
+            return onComplete(false, "কোনো শিক্ষার্থীর হাজিরা নির্বাচন করা হয়নি। অনুগ্রহ করে শিক্ষার্থীদের হাজিরা দিন অথবা 'সবাই উপস্থিত' চাপুন।")
         }
 
         viewModelScope.launch {
             _isSaving.value = true
             try {
+                _hasUnsavedAttendanceChanges.value = false
                 repository.saveAttendance(
                     userUuid = user.uuid,
                     classUuid = cls.uuid,
                     date = date,
-                    studentStatusMap = completeMap
+                    studentStatusMap = markedMap
                 )
+                _isCurrentDateSavedInDb.value = true
+                _attendanceUpdateVersion.value = _attendanceUpdateVersion.value + 1L
+                loadFeeSummariesForSelectedClass()
                 _isSaving.value = false
-                onComplete(true, "আজকের ($date) হাজিরা সফলভাবে সংরক্ষিত হয়েছে")
+                onComplete(true, "$date তারিখের (${markedMap.size} জনের) হাজিরা সফলভাবে সংরক্ষিত হয়েছে")
             } catch (e: Exception) {
+                _hasUnsavedAttendanceChanges.value = true
                 _isSaving.value = false
                 onComplete(false, "সংরক্ষণ ব্যর্থ: ${e.localizedMessage}")
             }
@@ -308,7 +408,7 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         gender: String,
         phone: String,
         email: String,
-        monthlyFee: Double = 500.0,
+        monthlyFee: Double = 0.0,
         admissionDate: String = "",
         onResult: (Boolean, String) -> Unit
     ) {
@@ -334,6 +434,35 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun updateStudent(
+        studentUuid: String,
+        roll: String,
+        name: String,
+        phone: String,
+        monthlyFee: Double,
+        admissionDate: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        val user = activeUser.value ?: return onResult(false, "লগইন করা প্রয়োজন")
+        viewModelScope.launch {
+            try {
+                repository.updateStudent(
+                    studentUuid = studentUuid,
+                    userUuid = user.uuid,
+                    roll = roll,
+                    name = name,
+                    phone = phone,
+                    monthlyFee = monthlyFee,
+                    admissionDate = admissionDate
+                )
+                loadFeeSummariesForSelectedClass()
+                onResult(true, "শিক্ষার্থীর তথ্য সফলভাবে আপডেট হয়েছে")
+            } catch (e: Exception) {
+                onResult(false, e.localizedMessage ?: "শিক্ষার্থী আপডেট ব্যর্থ হয়েছে")
+            }
+        }
+    }
+
     fun deleteStudent(studentUuid: String) {
         val user = activeUser.value ?: return
         viewModelScope.launch {
@@ -346,14 +475,19 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     fun loadFeeSummariesForSelectedClass() {
         val cls = _selectedClass.value ?: return
+        val user = activeUser.value ?: return
         viewModelScope.launch {
-            _isFeeLoading.value = true
+            if (_classFeeSummaries.value.isEmpty()) {
+                _isFeeLoading.value = true
+            }
             try {
                 val students = studentsInSelectedClass.value
                 val summaries = students.map { student ->
-                    repository.calculateStudentFeeSummary(student)
+                    repository.calculateStudentFeeSummary(student, user.uuid)
                 }
-                _classFeeSummaries.value = summaries
+                if (_classFeeSummaries.value != summaries) {
+                    _classFeeSummaries.value = summaries
+                }
             } catch (e: Exception) {
                 // Keep existing if any error
             } finally {
@@ -394,7 +528,21 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun getPaymentsForStudent(studentUuid: String) = repository.getPaymentsForStudent(studentUuid)
+    fun getPaymentsForStudent(studentUuid: String) =
+        repository.getPaymentsForStudent(studentUuid, activeUser.value?.uuid)
+
+    fun deleteFeePayment(paymentUuid: String, onResult: (Boolean, String) -> Unit) {
+        val user = activeUser.value ?: return onResult(false, "লগইন প্রয়োজন")
+        viewModelScope.launch {
+            try {
+                repository.deleteFeePayment(paymentUuid, user.uuid)
+                loadFeeSummariesForSelectedClass()
+                onResult(true, "পেমেন্ট সফলভাবে ডিলিট করা হয়েছে")
+            } catch (e: Exception) {
+                onResult(false, "পেমেন্ট ডিলিট ব্যর্থ: ${e.localizedMessage}")
+            }
+        }
+    }
 
     // --- Auth Actions ---
 
@@ -420,11 +568,26 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun registerOffline(name: String, email: String, inst: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = repository.registerLocally(name, email, inst)
+            if (result.isSuccess) {
+                onResult(true, "অফলাইন একাউন্ট সফলভাবে তৈরি হয়েছে!")
+            } else {
+                onResult(false, result.exceptionOrNull()?.message ?: "অফলাইন একাউন্ট তৈরি ব্যর্থ হয়েছে")
+            }
+        }
+    }
+
     fun logout() {
         viewModelScope.launch {
-            repository.logout()
             _selectedClass.value = null
             _attendanceMap.value = emptyMap()
+            _classReportData.value = null
+            _studentReportData.value = null
+            _classFeeSummaries.value = emptyList()
+            _unsyncedCount.value = 0
+            repository.logout()
         }
     }
 
@@ -465,8 +628,11 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     fun loadClassReport(classUuid: String, fromDate: String, toDate: String) {
         viewModelScope.launch {
-            _isReportLoading.value = true
-            val data = repository.getClassReport(classUuid, fromDate, toDate)
+            if (_classReportData.value == null) {
+                _isReportLoading.value = true
+            }
+            val user = activeUser.value
+            val data = repository.getClassReport(classUuid, fromDate, toDate, user?.uuid)
             _classReportData.value = data
             _isReportLoading.value = false
         }
@@ -474,8 +640,11 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     fun loadStudentReport(studentUuid: String, fromDate: String, toDate: String) {
         viewModelScope.launch {
-            _isReportLoading.value = true
-            val data = repository.getStudentReport(studentUuid, fromDate, toDate)
+            if (_studentReportData.value == null) {
+                _isReportLoading.value = true
+            }
+            val user = activeUser.value
+            val data = repository.getStudentReport(studentUuid, fromDate, toDate, user?.uuid)
             _studentReportData.value = data
             _isReportLoading.value = false
         }

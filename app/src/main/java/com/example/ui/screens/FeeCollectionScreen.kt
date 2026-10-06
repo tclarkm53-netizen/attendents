@@ -26,17 +26,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -49,6 +56,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -74,8 +82,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.local.entity.ClassEntity
 import com.example.data.local.entity.FeePaymentEntity
 import com.example.data.local.entity.StudentEntity
 import com.example.data.repository.StudentFeeSummary
@@ -83,6 +94,7 @@ import com.example.ui.theme.AbsentRed
 import com.example.ui.theme.LateAmber
 import com.example.ui.theme.PresentGreen
 import com.example.ui.viewmodel.AttendanceViewModel
+import com.example.utils.PdfReportGenerator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -200,24 +212,30 @@ fun FeeCollectionScreen(viewModel: AttendanceViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val counts = remember(feeSummaries) {
+                        val due = feeSummaries.count { !it.isFullyPaid }
+                        val paid = feeSummaries.count { it.isFullyPaid }
+                        Pair(due, paid)
+                    }
+                    val dueCount = counts.first
+                    val paidCount = counts.second
+
                     FilterChip(
                         selected = filterMode == "ALL",
                         onClick = { filterMode = "ALL" },
-                        label = { Text("সকল (${feeSummaries.size})", fontSize = 12.sp) },
+                        label = { Text("সকল (${feeSummaries.size})", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         modifier = Modifier.weight(1f)
                     )
-                    val dueCount = feeSummaries.count { !it.isFullyPaid }
                     FilterChip(
                         selected = filterMode == "DUE",
                         onClick = { filterMode = "DUE" },
-                        label = { Text("বকেয়া ($dueCount)", fontSize = 12.sp) },
+                        label = { Text("বকেয়া ($dueCount)", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         modifier = Modifier.weight(1f)
                     )
-                    val paidCount = feeSummaries.count { it.isFullyPaid }
                     FilterChip(
                         selected = filterMode == "PAID",
                         onClick = { filterMode = "PAID" },
-                        label = { Text("পরিশোধিত ($paidCount)", fontSize = 12.sp) },
+                        label = { Text("পরিশোধিত ($paidCount)", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -226,9 +244,16 @@ fun FeeCollectionScreen(viewModel: AttendanceViewModel) {
 
         // Aggregate Class Fee Statistics
         if (selectedClass != null && feeSummaries.isNotEmpty()) {
-            val totalPayable = feeSummaries.sumOf { it.totalPayable }
-            val totalPaid = feeSummaries.sumOf { it.totalPaid }
-            val totalDue = feeSummaries.sumOf { it.dueAmount }
+            val stats = remember(feeSummaries) {
+                Triple(
+                    feeSummaries.sumOf { it.totalPayable },
+                    feeSummaries.sumOf { it.totalPaid },
+                    feeSummaries.sumOf { it.dueAmount }
+                )
+            }
+            val totalPayable = stats.first
+            val totalPaid = stats.second
+            val totalDue = stats.third
 
             ElevatedCard(
                 modifier = Modifier
@@ -245,43 +270,51 @@ fun FeeCollectionScreen(viewModel: AttendanceViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("মোট প্রদেয়", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("মোট প্রদেয়", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             text = "৳${totalPayable.toInt()}",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("মোট আদায়", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("মোট আদায়", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             text = "৳${totalPaid.toInt()}",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = PresentGreen
+                            color = PresentGreen,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("মোট বকেয়া", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("মোট বকেয়া", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             text = "৳${totalDue.toInt()}",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = if (totalDue > 0) AbsentRed else PresentGreen
+                            color = if (totalDue > 0) AbsentRed else PresentGreen,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
         }
 
-        // Students List
-        val filteredList = feeSummaries.filter { summary ->
-            val matchesSearch = summary.student.name.contains(searchQuery, ignoreCase = true) ||
-                    summary.student.rollNumber.contains(searchQuery, ignoreCase = true)
-            val matchesFilter = when (filterMode) {
-                "DUE" -> !summary.isFullyPaid
-                "PAID" -> summary.isFullyPaid
-                else -> true
+        // Students List (memoized to avoid lag on scrolling and typing)
+        val filteredList = remember(feeSummaries, searchQuery, filterMode) {
+            feeSummaries.filter { summary ->
+                val matchesSearch = summary.student.name.contains(searchQuery, ignoreCase = true) ||
+                        summary.student.rollNumber.contains(searchQuery, ignoreCase = true)
+                val matchesFilter = when (filterMode) {
+                    "DUE" -> !summary.isFullyPaid
+                    "PAID" -> summary.isFullyPaid
+                    else -> true
+                }
+                matchesSearch && matchesFilter
             }
-            matchesSearch && matchesFilter
         }
 
         if (isFeeLoading) {
@@ -406,16 +439,20 @@ fun FeeStudentCard(
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
                         Text(
                             text = student.name,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (student.phone.isNotBlank()) {
                             Text(
                                 text = "মোবাইল: ${student.phone}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -449,74 +486,190 @@ fun FeeStudentCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Day Counting and Fee Calculation Details
-            Row(
+            // Attendance & 30-Day Billing Cycle Breakdown Card
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
             ) {
-                Column(modifier = Modifier.weight(1.2f)) {
-                    Text(
-                        text = "ভর্তির তারিখ: ${summary.admissionDate} (${summary.totalDaysEnrolled} দিন)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "বিলকৃত: ${summary.billedMonths} মাস",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                Column(modifier = Modifier.padding(12.dp)) {
+                    // Header Row: Admission date & Monthly fee edit
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = "রানিং: ${summary.runningDays} দিন",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                text = "ভর্তি: ${summary.admissionDate}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                    }
-                    Text(
-                        text = "কারেন্ট মাসে অতিবাহিত: ${summary.runningDays} দিন",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                    )
-                }
 
-                Column(
-                    modifier = Modifier.weight(0.9f),
-                    horizontalAlignment = Alignment.End
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("মাসিক: ৳${summary.monthlyFee.toInt()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        IconButton(onClick = onEditFee, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit Fee", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(start = 6.dp)
+                        ) {
+                            Text(
+                                text = "মাসিক: ৳${summary.monthlyFee.toInt()}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1
+                            )
+                            IconButton(onClick = onEditFee, modifier = Modifier.size(22.dp)) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit Fee",
+                                    modifier = Modifier.size(13.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
-                    Text(
-                        text = "মোট প্রদেয়: ৳${summary.totalPayable.toInt()}",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
-                    )
-                    Text(
-                        text = "(${summary.billedMonths} মাস × ৳${summary.monthlyFee.toInt()})",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        fontSize = 10.sp
-                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 3-Metric Stat Badges: [কার্যকর হাজিরা] [ধার্যকৃত মাস] [রানিং মাস]
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Card 1: Counted Days
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "কার্যকর হাজিরা",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${summary.elapsedDays} দিন",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "P+A+L মাত্র",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        // Card 2: Billed Months (elapsedDays / 30)
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "ধার্যকৃত মাস",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${summary.elapsedMonths} মাস",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "${summary.elapsedMonths * 30} দিন পূর্ণ",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Card 3: Running Month Days (elapsedDays % 30)
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (summary.runningMonthDays > 0) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "রানিং মাস",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${summary.runningMonthDays} দিন",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (summary.runningMonthDays > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "বাকি ${30 - summary.runningMonthDays} দিন",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // Explanatory Tag / Note
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (summary.elapsedDays > 0) {
+                                "${summary.elapsedDays} দিন ÷ ৩০ = ${summary.elapsedMonths} মাস ধার্য (অবশিষ্ট ${summary.runningMonthDays} দিন রানিং মাসে)"
+                            } else {
+                                "হাজিরা রেকর্ড: ০ দিন (শুক্রবার ও ছুটি হিসাব থেকে বাদ)"
+                            },
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                            lineHeight = 14.sp
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Paid vs Due Box
+            // Financial Balance Box
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
             ) {
                 Row(
                     modifier = Modifier
@@ -525,16 +678,54 @@ fun FeeStudentCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "পরিশোধিত: ৳${summary.totalPaid.toInt()}",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                        color = PresentGreen
-                    )
-                    Text(
-                        text = "বকেয়া বেতন: ৳${summary.dueAmount.toInt()}",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                        color = if (summary.dueAmount > 0) AbsentRed else PresentGreen
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "মোট প্রদেয়",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "৳${summary.totalPayable.toInt()}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "পরিশোধিত",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "৳${summary.totalPaid.toInt()}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = PresentGreen,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "বকেয়া বেতন",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "৳${summary.dueAmount.toInt()}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (summary.dueAmount > 0) AbsentRed else PresentGreen,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
@@ -552,7 +743,7 @@ fun FeeStudentCard(
                 ) {
                     Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("রিসিপ্ট হিস্ট্রি", fontSize = 12.sp)
+                    Text("রিসিপ্ট হিস্ট্রি", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
 
                 Button(
@@ -567,7 +758,7 @@ fun FeeStudentCard(
                 ) {
                     Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (isPaid) "অতিরিক্ত/অগ্রিম" else "বেতন আদায়", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(if (isPaid) "অতিরিক্ত/অগ্রিম" else "বেতন আদায়", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -619,17 +810,23 @@ fun PaymentDialog(
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text(
                             text = "${student.name} (রোল: ${student.rollNumber})",
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "ভর্তি: ${summary.admissionDate} (মোট ${summary.totalDaysEnrolled} দিন) | বিল: ${summary.billedMonths} মাস | রানিং: ${summary.runningDays} দিন",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            text = "হাজিরা: ${summary.elapsedDays} দিন (${summary.elapsedMonths} মাস ধার্য, রানিং: ${summary.runningMonthDays} দিন)",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "মাসিক বেতন: ৳${summary.monthlyFee.toInt()} | বকেয়া: ৳${summary.dueAmount.toInt()} (${summary.dueMonths} মাস)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "মাসিক: ৳${summary.monthlyFee.toInt()} | প্রদেয়: ৳${summary.totalPayable.toInt()} | বকেয়া: ৳${summary.dueAmount.toInt()} (${summary.dueMonths} মাস)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -655,7 +852,7 @@ fun PaymentDialog(
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            Text("পূর্ণ বকেয়া", fontSize = 10.sp)
+                            Text("পূর্ণ বকেয়া", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     OutlinedButton(
@@ -663,14 +860,14 @@ fun PaymentDialog(
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                     ) {
-                        Text("১ মাস (৳${summary.monthlyFee.toInt()})", fontSize = 10.sp)
+                        Text("১ মাস (৳${summary.monthlyFee.toInt()})", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     OutlinedButton(
                         onClick = { amountStr = (summary.monthlyFee * 2).toInt().toString() },
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                     ) {
-                        Text("২ মাস", fontSize = 10.sp)
+                        Text("২ মাস", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
 
@@ -789,8 +986,10 @@ fun PaymentHistoryDialog(
     viewModel: AttendanceViewModel,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val paymentsFlow = remember(student.uuid) { viewModel.getPaymentsForStudent(student.uuid) }
     val payments by paymentsFlow.collectAsState(initial = emptyList())
+    var paymentToDelete by remember { mutableStateOf<FeePaymentEntity?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -840,11 +1039,25 @@ fun PaymentHistoryDialog(
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             color = PresentGreen
                                         )
-                                        Text(
-                                            text = payment.paymentDate,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = payment.paymentDate,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            IconButton(
+                                                onClick = { paymentToDelete = payment },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = "Delete Payment",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Row(
@@ -881,6 +1094,35 @@ fun PaymentHistoryDialog(
             Button(onClick = onDismiss) { Text("ঠিক আছে") }
         }
     )
+
+    if (paymentToDelete != null) {
+        val p = paymentToDelete!!
+        AlertDialog(
+            onDismissRequest = { paymentToDelete = null },
+            title = { Text("পেমেন্ট ডিলিট নিশ্চিতকরণ") },
+            text = {
+                Text("আপনি কি নিশ্চিতভাবে এই রসিদের পেমেন্ট (৳${p.amountPaid.toInt()} টাকা, রসিদ: ${p.receiptNo}) ডিলিট করতে চান? এটি অ্যাপ এবং ক্লাউড সার্ভার উভয় থেকে স্থায়ীভাবে মুছে যাবে।")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteFeePayment(p.uuid) { success, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        }
+                        paymentToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("ডিলিট করুন")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { paymentToDelete = null }) {
+                    Text("বাতিল")
+                }
+            }
+        )
+    }
 }
 
 @Composable
